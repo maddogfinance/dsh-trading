@@ -1,0 +1,17 @@
+# The dsh-trading bundle: stacked on top of the stock `web` (or `headless`)
+# profile. One row per plugin; users patch rows by id from their profile's
+# cordis.patch.yml — e.g. replace `market-data-provider`'s config to point
+# `root` at their own candle store, or swap the row wholesale for their own
+# provider package. That row swap IS the bring-your-own-data mechanism.
+
+- insert:
+    - id: market-data
+      name: '@dsh-trading/market-data'
+
+    - id: market-data-provider
+      name: '@dsh-trading/provider-csv'
+      config:
+        root: ./data
+
+    - id: tool-market
+      name: '@dsh-trading/tool-market'

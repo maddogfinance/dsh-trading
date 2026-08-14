@@ -1,0 +1,10 @@
+node_modules/
+lib/
+*.tsbuildinfo
+.DS_Store
+.claude/
+
+# Sample candles are generated, not shipped — run examples/generate-sample-data.mjs.
+# `/data` is the local convenience symlink dsh reads when run from the repo root.
+/data
+/examples/data/

@@ -1,0 +1,24 @@
+{
+  "name": "@dsh-trading/bundle",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness bundle wiring the dsh-trading research stack into a profile",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "true",
+    "typecheck": "true"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@dsh-trading/market-data": "workspace:^",
+    "@dsh-trading/provider-csv": "workspace:^",
+    "@dsh-trading/tool-market": "workspace:^"
+  }
+}
