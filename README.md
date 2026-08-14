@@ -9,7 +9,8 @@ A trading **research** workbench built as plugins for [DeepSeek Harness](https:/
 Four packages, one direction of dependency:
 
 ```
-@dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv, indicators)
+@dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
+                              market_snapshot) + the indicator library
         │  consumes
         ▼
 @dsh-trading/market-data      the seam: ctx.marketData — typed candle/symbol interface
@@ -23,7 +24,7 @@ Four packages, one direction of dependency:
 
 - **`market-data`** defines the seam and nothing else (its only peer is cordis). Every consumer talks to `ctx.marketData`; every data source hides behind `MarketDataProvider`.
 - **`provider-csv`** is the *bring-your-own-data* template: ~100 lines, local `<root>/<symbol>/<timeframe>.csv` files. Copy it to put ClickHouse, a broker API, or CCXT behind the same interface — tools upstream never change.
-- **`tool-market`** registers read-only analysis tools on `ctx.tools`; indicator math (SMA, RSI) is pure and deterministic so session-log replay recomputes identical model-visible numbers.
+- **`tool-market`** registers read-only analysis tools on `ctx.tools`. `market_snapshot` returns a whole multi-timeframe indicator regime in one call (RSI, slow stochastic, ADX/DI, MACD, MFI, ATR, SMA/EMA posture, Bollinger) with coarse state labels; `get_ohlcv` serves raw bars when structure matters. The indicator math is pure and deterministic — textbook definitions with Wilder smoothing where Wilder defined it — so values reconcile against any charting platform and a session-log replay recomputes identical model-visible numbers.
 - **`bundle/trading`** wires the rows into a dsh profile via `cordis.patch.yml`. Users repoint or replace the `market-data-provider` row from their own profile patch — that row swap **is** the BYO mechanism.
 
 ## Hard boundary: research only
@@ -68,6 +69,22 @@ cd examples && dsh --profile trading "pull DEMO-EQ daily candles with sma20/sma5
 
 Verify the composed layers any time with `dsh --profile trading --dump-config`.
 
+### The Market Analyst preset
+
+`presets/analyst/` is an agent preset that turns the raw tools into a structured
+analysis workflow: it scopes the request first (horizon, focus, timeframes),
+then reports higher-timeframe context, a key-level table, the multi-timeframe
+indicator regime with conflicts named rather than averaged away, bull and bear
+scenarios with triggers and invalidation, and the levels that resolve the
+ambiguity. Install it and pick **Market Analyst** in the session's preset menu:
+
+```sh
+mkdir -p "$DSH_HOME/.agent-presets" && cp -r presets/analyst "${DSH_HOME:-$HOME/.dsh}/.agent-presets/"
+```
+
+The persona holds the research boundary in prose the way `risk-guard` holds it
+in code: report what the data shows, never recommend a position or an entry.
+
 ## Development
 
 ```sh
@@ -79,7 +96,7 @@ pnpm build
 ## Roadmap
 
 - [ ] Profile template + docs for stacking onto `dsh --profile web`
-- [ ] Chart panel (client package, `@Remote` host service)
+- [ ] Chart panel and indicator gauges (client package, `@Remote` host service) — `market_snapshot` already returns the structured payload these will read
 - [ ] Research-journal session events (hypotheses, signals — replayable)
 - [ ] Deterministic backtest runner as a `ctx.commands` CLI command (never model-executed)
 - [ ] More providers: Parquet, ClickHouse, CCXT

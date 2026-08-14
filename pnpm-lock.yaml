@@ -20,6 +20,9 @@ importers:
       '@dsh-trading/provider-csv':
         specifier: workspace:^
         version: link:../../packages/provider-csv
+      '@dsh-trading/risk-guard':
+        specifier: workspace:^
+        version: link:../../packages/risk-guard
       '@dsh-trading/tool-market':
         specifier: workspace:^
         version: link:../../packages/tool-market
@@ -74,9 +77,15 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(f8724372086ccc1457fc84e7becee2e0)
+      '@deepseek-ai/schemastery':
+        specifier: ^3.18.1
+        version: 3.18.1
       '@dsh-trading/market-data':
         specifier: workspace:^
         version: link:../market-data
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
