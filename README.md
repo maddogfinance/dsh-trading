@@ -6,7 +6,7 @@ A trading **research** workbench built as plugins for [DeepSeek Harness](https:/
 
 ## Design
 
-Three packages, one direction of dependency:
+Four packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv, indicators)
@@ -16,6 +16,9 @@ Three packages, one direction of dependency:
         ▲  implements
         │
 @dsh-trading/provider-csv     reference provider: local CSV files
+
+@dsh-trading/risk-guard       independent: refuses execution-shaped tool names
+                              from any plugin, at dsh's tools/pre-execute gate
 ```
 
 - **`market-data`** defines the seam and nothing else (its only peer is cordis). Every consumer talks to `ctx.marketData`; every data source hides behind `MarketDataProvider`.
@@ -26,6 +29,8 @@ Three packages, one direction of dependency:
 ## Hard boundary: research only
 
 This project deliberately has **no order-execution capability and no execution seam**. Tools read data and compute; nothing places, routes, or simulates-then-forwards orders. Contributions adding live trading execution are out of scope. Nothing here is investment advice.
+
+`@dsh-trading/risk-guard` extends that stance over plugins this project does not ship: it refuses order-execution and fund-movement tool names at dsh's `tools/pre-execute` gate, so mounting a broker plugin in a `trading` profile does not quietly gain the ability to trade. Name matching is a heuristic and cannot be complete — the guard is defense in depth, not the guarantee. The guarantee is structural: there is no execution seam to reach.
 
 ## Data format (CSV provider)
 
@@ -77,7 +82,6 @@ pnpm build
 - [ ] Chart panel (client package, `@Remote` host service)
 - [ ] Research-journal session events (hypotheses, signals — replayable)
 - [ ] Deterministic backtest runner as a `ctx.commands` CLI command (never model-executed)
-- [ ] `agent/pre-step` risk-guard plugin (enforce the research-only boundary in depth)
 - [ ] More providers: Parquet, ClickHouse, CCXT
 
 ## License

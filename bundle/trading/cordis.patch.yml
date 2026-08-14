@@ -15,3 +15,8 @@
 
     - id: tool-market
       name: '@dsh-trading/tool-market'
+
+    # Refuses order-execution and fund-movement tool names from ANY plugin in
+    # this profile, not just ours. Remove this row to opt out deliberately.
+    - id: risk-guard
+      name: '@dsh-trading/risk-guard'
