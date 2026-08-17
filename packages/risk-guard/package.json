@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/risk-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Refuse order-execution and fund-movement tool calls at the dsh tools/pre-execute gate",
   "type": "module",
   "license": "MIT",

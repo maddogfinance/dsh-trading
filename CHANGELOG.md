@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-08-17
+
+- `@dsh-trading/client-chart`: fix the scenario reader to match the published
+  v1 contract — `stance` is required, `triggerPrice`/`invalidationPrice` are
+  preserved so scenario trigger/invalidation lines render on the chart, and
+  legacy `weight`-shaped scenarios are dropped gracefully. Restores strict
+  client type checking via klinecharts public types. Contributed by
+  [@abigfatstone](https://github.com/abigfatstone) in
+  [#1](https://github.com/maddogfinance/dsh-trading/pull/1) — this project's
+  first outside contribution.
+- All packages: add npm keywords for ecosystem discovery.
+
 ## 0.1.0 — 2026-08-17
 
 First public release. Five packages plus the profile bundle, published as

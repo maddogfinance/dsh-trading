@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/market-data",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Market-data seam for DeepSeek Harness: one typed interface for candles and symbols, any provider behind it (bring your own data)",
   "type": "module",
   "license": "MIT",
