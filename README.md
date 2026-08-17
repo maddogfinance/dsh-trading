@@ -67,9 +67,18 @@ data/
 
 ## Try it with dsh
 
-Build, then compose a `trading` profile from your checkout (dsh resolves plugin
-rows from the profile directory, so the plugin packages must be linked alongside
-the bundle — a published bundle pulls them in as ordinary dependencies instead):
+One command — the published bundle pulls every plugin package from npm:
+
+```sh
+dsh plugin --profile trading add @dsh-trading/bundle
+```
+
+<details>
+<summary>Or from a checkout (for hacking on the packages)</summary>
+
+Build, then compose the profile from local paths (dsh resolves plugin rows
+from the profile directory, so the packages must be linked alongside the
+bundle):
 
 ```sh
 pnpm install && pnpm build
@@ -79,6 +88,8 @@ dsh plugin --profile trading add ./bundle/trading \
     ./packages/market-data ./packages/provider-csv ./packages/tool-market \
     ./packages/risk-guard ./packages/client-chart
 ```
+
+</details>
 
 Add `"@deepseek-ai/dsh-headless"` (or `"@deepseek-ai/dsh-web-app"`) after
 `@deepseek-ai/dsh-base` in the profile's `dsh.profile.bundles` list
