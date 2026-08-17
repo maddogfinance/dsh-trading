@@ -22,3 +22,9 @@
     # this profile, not just ours. Remove this row to opt out deliberately.
     - id: risk-guard
       name: '@dsh-trading/risk-guard'
+
+    # Web-only candlestick cards for market_snapshot / get_ohlcv results.
+    # Harmless under headless profiles (the host half is a no-op); remove the
+    # row if you want the generic text cards back.
+    - id: client-chart
+      name: '@dsh-trading/client-chart'

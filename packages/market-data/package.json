@@ -26,5 +26,15 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maddogfinance/dsh-trading.git",
+    "directory": "packages/market-data"
+  },
+  "homepage": "https://github.com/maddogfinance/dsh-trading#readme",
+  "bugs": "https://github.com/maddogfinance/dsh-trading/issues",
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -6,7 +6,7 @@ A trading **research** workbench built as plugins for [DeepSeek Harness](https:/
 
 ## Design
 
-Four packages, one direction of dependency:
+Five packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
@@ -20,12 +20,24 @@ Four packages, one direction of dependency:
 
 @dsh-trading/risk-guard       independent: refuses execution-shaped tool names
                               from any plugin, at dsh's tools/pre-execute gate
+
+@dsh-trading/client-chart     web-only: candlestick cards for market_snapshot /
+                              get_ohlcv results in dsh web (no host capability)
 ```
 
 - **`market-data`** defines the seam and nothing else (its only peer is cordis). Every consumer talks to `ctx.marketData`; every data source hides behind `MarketDataProvider`.
 - **`provider-csv`** is the *bring-your-own-data* template: ~100 lines, local `<root>/<symbol>/<timeframe>.csv` files. Copy it to put ClickHouse, a broker API, or CCXT behind the same interface — tools upstream never change.
 - **`tool-market`** registers read-only analysis tools on `ctx.tools`. `market_snapshot` returns a whole multi-timeframe indicator regime in one call (RSI, slow stochastic, ADX/DI, MACD, MFI, ATR, SMA/EMA posture, Bollinger) with coarse state labels; `get_ohlcv` serves raw bars when structure matters. The indicator math is pure and deterministic — textbook definitions with Wilder smoothing where Wilder defined it — so values reconcile against any charting platform and a session-log replay recomputes identical model-visible numbers.
 - **`bundle/trading`** wires the rows into a dsh profile via `cordis.patch.yml`. Users repoint or replace the `market-data-provider` row from their own profile patch — that row swap **is** the BYO mechanism.
+
+## Why this and not another finance plugin?
+
+Data plugins hard-wire one source; dsh-trading defines the seam they can all plug
+into. Quant toolkits ship one tool per indicator; `market_snapshot` returns the
+whole multi-timeframe regime in one call, with state labels computed from the
+rounded reported values so chart and number never disagree. And everyone else's
+"research only" is a README sentence — ours is a `tools/pre-execute` gate you can
+test.
 
 ## Hard boundary: research only
 
@@ -54,7 +66,8 @@ pnpm install && pnpm build
 node examples/generate-sample-data.mjs
 
 dsh plugin --profile trading add ./bundle/trading \
-    ./packages/market-data ./packages/provider-csv ./packages/tool-market
+    ./packages/market-data ./packages/provider-csv ./packages/tool-market \
+    ./packages/risk-guard ./packages/client-chart
 ```
 
 Add `"@deepseek-ai/dsh-headless"` (or `"@deepseek-ai/dsh-web-app"`) after
@@ -85,6 +98,19 @@ mkdir -p "$DSH_HOME/.agent-presets" && cp -r presets/analyst "${DSH_HOME:-$HOME/
 The persona holds the research boundary in prose the way `risk-guard` holds it
 in code: report what the data shows, never recommend a position or an entry.
 
+### Chart cards in `dsh web`
+
+Under the `web` surface, `market_snapshot` and `get_ohlcv` results render as
+interactive candlestick cards (`@dsh-trading/client-chart`): K-line + volume +
+SMA20/50/200, timeframe tabs, and a chip strip showing the exact indicator
+values the model read. The chart data rides the durable `tool/result` event's
+presentation metadata — it never enters the model's context (zero token cost)
+and it replays with the session log. The chart pane draws only unambiguous
+math (candles, SMA, volume); every other indicator appears as the
+RegimeSnapshot's own numbers, so the card can never contradict the analysis
+text beside it. Headless profiles ignore the package; without it, dsh falls
+back to the generic text card.
+
 ## Development
 
 ```sh
@@ -96,7 +122,11 @@ pnpm build
 ## Roadmap
 
 - [ ] Profile template + docs for stacking onto `dsh --profile web`
-- [ ] Chart panel and indicator gauges (client package, `@Remote` host service) — `market_snapshot` already returns the structured payload these will read
+- [x] Chart cards in `dsh web` (`@dsh-trading/client-chart`): `market_snapshot` / `get_ohlcv` render as interactive candlesticks with chip-toggled indicator panes
+- [x] `annotate_chart`: model-authored levels/zones/paths with mandatory provenance and a hard price-range gate, plus base/alternative scenarios — rendered on the card with a levels table
+- [x] Open contracts for ecosystem builders ([CONTRACTS.md](./CONTRACTS.md)): chart payload, open annotation envelope, pure-renderer registry
+- [ ] Chart panel deepening: user-drawing feedback to the agent, `@Remote` host service for pan-back data
+- [ ] Watch/alert contract (notify-only), `@dsh-trading/contracts` package, conformance fixtures
 - [ ] Research-journal session events (hypotheses, signals — replayable)
 - [ ] Deterministic backtest runner as a `ctx.commands` CLI command (never model-executed)
 - [ ] More providers: Parquet, ClickHouse, CCXT

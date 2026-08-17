@@ -17,9 +17,20 @@
     }
   },
   "dependencies": {
+    "@dsh-trading/client-chart": "workspace:^",
     "@dsh-trading/market-data": "workspace:^",
     "@dsh-trading/provider-csv": "workspace:^",
     "@dsh-trading/risk-guard": "workspace:^",
     "@dsh-trading/tool-market": "workspace:^"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maddogfinance/dsh-trading.git",
+    "directory": "bundle/trading"
+  },
+  "homepage": "https://github.com/maddogfinance/dsh-trading#readme",
+  "bugs": "https://github.com/maddogfinance/dsh-trading/issues",
+  "publishConfig": {
+    "access": "public"
   }
 }
