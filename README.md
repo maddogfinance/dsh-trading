@@ -4,6 +4,16 @@ A trading **research** workbench built as plugins for [DeepSeek Harness](https:/
 
 > **Status: early scaffold.** dsh itself is in developer preview and moves fast; expect breaking changes on both sides.
 
+## Demo
+
+![Interactive chart cards in dsh web: chips toggle indicator panes drawn from the model's own numbers; annotate_chart draws provenance-gated levels](media/demo-preview.gif)
+
+▶ **[Watch the full 80-second demo with narration](media/demo.mp4)** — the
+agent answers with an interactive chart card, chips draw indicator panes from
+the exact per-bar series the model read, and `annotate_chart` puts levels on
+the chart through a trust gate: mandatory provenance, prices validated against
+the real candle window. All footage is a live session, no mockups.
+
 ## Design
 
 Five packages, one direction of dependency:
