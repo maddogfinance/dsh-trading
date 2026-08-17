@@ -41,5 +41,14 @@
   "bugs": "https://github.com/maddogfinance/dsh-trading/issues",
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "trading",
+    "market-data",
+    "technical-analysis",
+    "research"
+  ]
 }

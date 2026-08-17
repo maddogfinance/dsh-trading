@@ -16,5 +16,10 @@
   "devDependencies": {
     "vitest": "^3.0.0"
   },
-  "packageManager": "pnpm@10.4.1"
+  "packageManager": "pnpm@10.4.1",
+  "dsh": {
+    "bundle": {
+      "patch": "./bundle/trading/cordis.patch.yml"
+    }
+  }
 }
