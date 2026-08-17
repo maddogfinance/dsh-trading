@@ -22,10 +22,12 @@ export type ChartAnnotation = { type: string } & Record<string, unknown>
 
 export type ChartScenario = {
   direction: 'bull' | 'bear'
-  weight?: number
+  stance: 'base' | 'alternative'
   thesis: string
   trigger: string
   invalidation: string
+  triggerPrice?: number
+  invalidationPrice?: number
 }
 
 export type ChartTimeframeData = {
@@ -79,14 +81,22 @@ function readTimeframe(x: unknown): ChartTimeframeData | null {
 function readScenario(x: unknown): ChartScenario | null {
   if (!isRecord(x)) return null
   if (x['direction'] !== 'bull' && x['direction'] !== 'bear') return null
+  if (x['stance'] !== 'base' && x['stance'] !== 'alternative') return null
   if (typeof x['thesis'] !== 'string' || typeof x['trigger'] !== 'string' || typeof x['invalidation'] !== 'string') return null
-  const weight = typeof x['weight'] === 'number' && Number.isFinite(x['weight']) ? x['weight'] : undefined
+  const triggerPrice = typeof x['triggerPrice'] === 'number' && Number.isFinite(x['triggerPrice'])
+    ? x['triggerPrice']
+    : undefined
+  const invalidationPrice = typeof x['invalidationPrice'] === 'number' && Number.isFinite(x['invalidationPrice'])
+    ? x['invalidationPrice']
+    : undefined
   return {
     direction: x['direction'],
+    stance: x['stance'],
     thesis: x['thesis'],
     trigger: x['trigger'],
     invalidation: x['invalidation'],
-    ...weight !== undefined ? { weight } : {},
+    ...triggerPrice !== undefined ? { triggerPrice } : {},
+    ...invalidationPrice !== undefined ? { invalidationPrice } : {},
   }
 }
 

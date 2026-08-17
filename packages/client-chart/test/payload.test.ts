@@ -20,6 +20,42 @@ describe('readChartPayload', () => {
     expect(p!.timeframes[0]!.candles[0]!.close).toBe(1.5)
   })
 
+  it('preserves the current v1 scenario contract', () => {
+    const p = payload()
+    p['scenarios'] = [{
+      direction: 'bull',
+      stance: 'base',
+      thesis: 'price holds support',
+      trigger: 'close above resistance',
+      invalidation: 'close below support',
+      triggerPrice: 2,
+      invalidationPrice: 1,
+    }]
+
+    expect(readChartPayload(p)?.scenarios).toEqual([{
+      direction: 'bull',
+      stance: 'base',
+      thesis: 'price holds support',
+      trigger: 'close above resistance',
+      invalidation: 'close below support',
+      triggerPrice: 2,
+      invalidationPrice: 1,
+    }])
+  })
+
+  it('drops scenarios that do not carry a v1 stance', () => {
+    const p = payload()
+    p['scenarios'] = [{
+      direction: 'bull',
+      weight: 0.6,
+      thesis: 'legacy shape',
+      trigger: 'x',
+      invalidation: 'y',
+    }]
+
+    expect(readChartPayload(p)?.scenarios).toBeUndefined()
+  })
+
   it('rejects absent, foreign, and wrong-version metas', () => {
     expect(readChartPayload(undefined)).toBeNull()
     expect(readChartPayload(null)).toBeNull()
