@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { dispose, init, registerIndicator, registerOverlay } from 'klinecharts'
+import type { Chart, OverlayCreateFiguresCallbackParams } from 'klinecharts'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { contentText, readChartPayload } from './payload.js'
 import type { ChartAnnotation, ChartScenario, ChartTimeframeData } from './payload.js'
@@ -157,7 +158,7 @@ function ensureRegistered(): void {
     name: 'tm_hline',
     totalStep: 2,
     lock: true,
-    createPointFigures: ({ coordinates, bounding, overlay }) => {
+    createPointFigures: ({ coordinates, bounding, overlay }: OverlayCreateFiguresCallbackParams) => {
       const y = coordinates[0]?.y
       if (y === undefined) return []
       const ext = (overlay.extendData ?? {}) as Record<string, unknown>
@@ -183,7 +184,7 @@ function ensureRegistered(): void {
     name: 'tm_region',
     totalStep: 3,
     lock: true,
-    createPointFigures: ({ coordinates, bounding, overlay }) => {
+    createPointFigures: ({ coordinates, bounding, overlay }: OverlayCreateFiguresCallbackParams) => {
       const y0 = coordinates[0]?.y
       const y1 = coordinates[1]?.y
       if (y0 === undefined || y1 === undefined) return []
@@ -211,7 +212,7 @@ function ensureRegistered(): void {
     name: 'tm_polyline',
     totalStep: 14,
     lock: true,
-    createPointFigures: ({ coordinates, overlay }) => {
+    createPointFigures: ({ coordinates, overlay }: OverlayCreateFiguresCallbackParams) => {
       if (coordinates.length < 2) return []
       const ext = (overlay.extendData ?? {}) as Record<string, unknown>
       const color = typeof ext['color'] === 'string' ? ext['color'] : '#888888'
@@ -312,7 +313,7 @@ const CHIP_DEFS: ChipDef[] = [
   { id: 'ma', label: ind => ({ text: 'MA posture', state: get(ind['movingAverages'], 'closeVs') }) },
 ]
 
-function drawPrimitive(chart: { createOverlay: (o: unknown) => unknown }, prim: DrawPrimitive): void {
+function drawPrimitive(chart: Pick<Chart, 'createOverlay'>, prim: DrawPrimitive): void {
   if (prim.kind === 'hline') {
     chart.createOverlay({
       name: 'tm_hline', lock: true,
