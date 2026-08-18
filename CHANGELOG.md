@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/provider-csv` — `parseCsv` now enforces the parts of the
+  contract it previously only documented: bar times must carry a timezone
+  designator (a naive local time parses differently per machine and breaks
+  replay), rows must be strictly ascending (duplicates and out-of-order rows
+  are refused with line numbers — every indicator upstream assumes ascending
+  bars), and a bar whose high is below its low is refused.
+
 ## 0.1.1 — 2026-08-17
 
 - `@dsh-trading/client-chart`: fix the scenario reader to match the published
@@ -11,6 +20,16 @@
   [#1](https://github.com/maddogfinance/dsh-trading/pull/1) — this project's
   first outside contribution.
 - All packages: add npm keywords for ecosystem discovery.
+=======
+## Unreleased
+
+- `@dsh-trading/provider-csv` — `parseCsv` now enforces the parts of the
+  contract it previously only documented: bar times must carry a timezone
+  designator (a naive local time parses differently per machine and breaks
+  replay), rows must be strictly ascending (duplicates and out-of-order rows
+  are refused with line numbers — every indicator upstream assumes ascending
+  bars), and a bar whose high is below its low is refused.
+>>>>>>> 0e8e759 (provider-csv: enforce the time contract parseCsv only documented)
 
 ## 0.1.0 — 2026-08-17
 

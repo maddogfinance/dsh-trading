@@ -6,7 +6,8 @@
  *     <root>/BTC-USDT/1h.csv
  *
  * with the header `time,open,high,low,close,volume` and ISO-8601 UTC times,
- * ascending. Small by design — this package is the template a user copies to
+ * ascending — all four validated on read: header shape, timezone-designated
+ * times, strictly ascending order (duplicates refused), finite numbers. Small by design — this package is the template a user copies to
  * put their OWN store (ClickHouse, broker API, CCXT) behind the same seam.
  * @module @dsh-trading/provider-csv
  */
@@ -44,6 +45,8 @@ export function parseCsv(body: string, file: string): Candle[] {
   if (lines[0]?.trim() !== HEADER) {
     throw new Error(`${file}: first line must be '${HEADER}' (got '${lines[0] ?? ''}')`)
   }
+  let prevMs = -Infinity
+  let prevTime = ''
   return lines.slice(1).map((line, i) => {
     const cells = line.split(',')
     if (cells.length !== 6) {
@@ -51,12 +54,34 @@ export function parseCsv(body: string, file: string): Candle[] {
     }
     const [time, ...nums] = cells
     const [open, high, low, close, volume] = nums.map(Number)
-    if (Number.isNaN(Date.parse(time!))) {
+    const ms = Date.parse(time!)
+    if (Number.isNaN(ms)) {
       throw new Error(`${file}:${i + 2}: unparsable time '${time}'`)
+    }
+    // A time-of-day without a timezone designator parses in the machine's
+    // LOCAL zone: the same file would serve different bars on different
+    // machines, and a session-log replay elsewhere would recompute different
+    // model-visible numbers. (Date-only forms are UTC per ISO-8601, so they
+    // pass.)
+    if (time!.includes('T') && !/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(time!)) {
+      throw new Error(`${file}:${i + 2}: time '${time}' has no timezone designator — use ISO-8601 UTC bar-open times, e.g. 2024-01-01T00:00:00Z`)
     }
     if ([open, high, low, close, volume].some(v => !Number.isFinite(v))) {
       throw new Error(`${file}:${i + 2}: non-numeric OHLCV cell`)
     }
+    if (high! < low!) {
+      throw new Error(`${file}:${i + 2}: high ${high} is below low ${low}`)
+    }
+    // Every indicator upstream assumes ascending bars; a shuffled or
+    // double-exported file would silently corrupt all of them.
+    if (ms === prevMs) {
+      throw new Error(`${file}:${i + 2}: duplicate bar time '${time}' (same instant as '${prevTime}')`)
+    }
+    if (ms < prevMs) {
+      throw new Error(`${file}:${i + 2}: bar time '${time}' is before the previous bar '${prevTime}' — rows must be ascending by time`)
+    }
+    prevMs = ms
+    prevTime = time!
     return { time: time!, open: open!, high: high!, low: low!, close: close!, volume: volume! }
   })
 }

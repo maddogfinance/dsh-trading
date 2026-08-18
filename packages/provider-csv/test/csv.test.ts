@@ -117,6 +117,37 @@ describe('parseCsv', () => {
     const body = [HEADER, '2024-01-01T00:00:00Z,10,12,9,11,NaN'].join('\n')
     expect(() => parseCsv(body, 'fixture.csv')).toThrow('fixture.csv:2: non-numeric OHLCV cell')
   })
+
+  it('rejects a naive local time (no timezone designator)', () => {
+    const body = [HEADER, '2024-01-01T00:00:00,10,12,9,11,100'].join('\n')
+    expect(() => parseCsv(body, 'fixture.csv')).toThrow(
+      "fixture.csv:2: time '2024-01-01T00:00:00' has no timezone designator",
+    )
+  })
+
+  it('accepts date-only times (UTC per ISO-8601) and explicit offsets', () => {
+    const body = [HEADER, '2024-01-01,10,12,9,11,100', '2024-01-02T02:00:00+02:00,11,13,10,12,200'].join('\n')
+    expect(parseCsv(body, 'fixture.csv')).toHaveLength(2)
+  })
+
+  it('rejects a duplicate bar time, even spelled differently', () => {
+    const body = [HEADER, ROWS[0], '2024-01-01T00:00:00+00:00,11,13,10,12,200'].join('\n')
+    expect(() => parseCsv(body, 'fixture.csv')).toThrow(
+      "fixture.csv:3: duplicate bar time '2024-01-01T00:00:00+00:00' (same instant as '2024-01-01T00:00:00Z')",
+    )
+  })
+
+  it('rejects out-of-order rows, naming both times', () => {
+    const body = [HEADER, ROWS[1], ROWS[0]].join('\n')
+    expect(() => parseCsv(body, 'fixture.csv')).toThrow(
+      "fixture.csv:3: bar time '2024-01-01T00:00:00Z' is before the previous bar '2024-01-02T00:00:00Z' — rows must be ascending by time",
+    )
+  })
+
+  it('rejects a bar whose high is below its low', () => {
+    const body = [HEADER, '2024-01-01T00:00:00Z,10,9,12,11,100'].join('\n')
+    expect(() => parseCsv(body, 'fixture.csv')).toThrow('fixture.csv:2: high 9 is below low 12')
+  })
 })
 
 describe('apply', () => {
