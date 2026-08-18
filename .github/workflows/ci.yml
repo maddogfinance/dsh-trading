@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Daily canary: catches upstream drift (dsh rc bumps, dependency breakage)
+    # while nobody is looking. A maintained repo proves it by machine.
+    - cron: '20 2 * * *'
 
 jobs:
   test:
