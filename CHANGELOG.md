@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/tool-market` — the annotate_chart trust gate now lives in its
+  own pure module (`annotation-gate.ts`) with boundary-exact tests: tolerance
+  bands (×0.7..×1.3, projection ×0.5..×2.0), the 10% forward projection
+  allowance, zone width, provenance requirements, structural caps, and text
+  cleaning are all pinned. `gateWindow`/`gateAnnotations` (plus the caps and
+  `clean`) are exported so third-party authoring tools can reuse the same gate
+  CONTRACTS.md asks them to hold. Behavior and error messages are unchanged.
+
 ## 0.1.1 — 2026-08-17
 
 - `@dsh-trading/client-chart`: fix the scenario reader to match the published
