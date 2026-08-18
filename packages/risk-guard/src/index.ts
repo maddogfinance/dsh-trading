@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { compilePolicy, DEFAULT_DENY_PATTERNS } from './policy.js'
 import type { GuardMode } from './policy.js'
 
-export { compilePolicy, DEFAULT_DENY_PATTERNS } from './policy.js'
+export { compilePolicy, DEFAULT_DENY_PATTERNS, nameCandidates } from './policy.js'
 export type { GuardMode, GuardPolicy, GuardVerdict } from './policy.js'
 
 export const name = 'risk-guard'

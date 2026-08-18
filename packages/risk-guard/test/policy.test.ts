@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compilePolicy, DEFAULT_DENY_PATTERNS } from '../src/policy.js'
+import { compilePolicy, DEFAULT_DENY_PATTERNS, nameCandidates } from '../src/policy.js'
 
 const defaults = { mode: 'denylist' as const, deny: DEFAULT_DENY_PATTERNS, allow: [] }
 const guard = compilePolicy(defaults)
@@ -43,7 +43,6 @@ describe('denylist mode', () => {
   })
 
   it('is case-insensitive', () => {
-    expect(guard('PlaceOrder').allowed).toBe(true)
     expect(guard('Place_Order').allowed).toBe(false)
     expect(guard('SELL').allowed).toBe(false)
   })
@@ -76,6 +75,63 @@ describe('denylist mode', () => {
   })
 })
 
+describe('name normalization', () => {
+  it.each([
+    // camelCase spellings of the textbook shapes.
+    'placeOrder',
+    'PlaceOrder',
+    'submitOrder',
+    'cancelOrder',
+    // MCP-style double-underscore namespacing.
+    'mcp__ib__place_order',
+    'mcp__exchange__buy',
+    'mcp__broker__closePosition',
+    // Dot / slash / colon namespacing.
+    'broker.place_order',
+    'broker.orders.cancelOrder',
+    'exchange/sell',
+    'wallet:withdraw',
+    // Hyphenated word separators.
+    'open-position',
+    'broker-tools__submit-order',
+  ])('refuses the namespaced or camelCased execution shape %s', (name) => {
+    expect(guard(name).allowed).toBe(false)
+  })
+
+  it.each([
+    // Segments must stay anchored: 'uniswap' is not 'swap'.
+    'mcp__uniswap__get_quote',
+    'ordering_service__status',
+    // camelCase research tools normalize to names the patterns still skip.
+    'getOhlcv',
+    'listSymbols',
+    'marketSnapshot',
+    'research.trade_history',
+    'mcp__broker__order_book_depth',
+  ])('permits %s', (name) => {
+    expect(guard(name).allowed).toBe(true)
+  })
+
+  it('names the normalized form in the reason when it differs from the raw name', () => {
+    const verdict = guard('mcp__ib__placeOrder')
+    if (verdict.allowed) throw new Error('expected a denial')
+    expect(verdict.reason).toContain('mcp__ib__placeOrder')
+    expect(verdict.reason).toContain('place_order')
+  })
+
+  it('applies custom patterns to segments too', () => {
+    const custom = compilePolicy({ ...defaults, deny: ['^broker_'] })
+    expect(custom('mcp__srv__broker_action').allowed).toBe(false)
+  })
+
+  it('still exempts the exact RAW name on the allow list', () => {
+    const lenient = compilePolicy({ ...defaults, allow: ['mcp__ib__place_order'] })
+    expect(lenient('mcp__ib__place_order').allowed).toBe(true)
+    // The exemption is the reported name, not its normalized form.
+    expect(lenient('place_order').allowed).toBe(false)
+  })
+})
+
 describe('allowlist mode', () => {
   const strict = compilePolicy({ mode: 'allowlist', deny: DEFAULT_DENY_PATTERNS, allow: ['get_ohlcv', 'list_symbols'] })
 
@@ -99,5 +155,22 @@ describe('allowlist mode', () => {
     const verdict = strict('bash')
     if (verdict.allowed) throw new Error('expected a denial')
     expect(verdict.reason).toContain('allowlist mode')
+  })
+})
+
+describe('nameCandidates', () => {
+  it.each([
+    ['place_order', ['place_order']],
+    ['placeOrder', ['place_order']],
+    ['mcp__ib__place_order', ['mcp_ib_place_order', 'mcp', 'ib', 'place_order']],
+    ['broker.orders.cancelOrder', ['broker_orders_cancel_order', 'broker', 'orders', 'cancel_order']],
+    ['broker-tools__submit-order', ['broker_tools_submit_order', 'broker_tools', 'submit_order']],
+    ['HTTPSell', ['http_sell']],
+  ])('%s -> %j', (name, expected) => {
+    expect(nameCandidates(name)).toEqual(expected)
+  })
+
+  it('falls back to the lowercased raw name on degenerate input', () => {
+    expect(nameCandidates('__')).toEqual(['__'])
   })
 })

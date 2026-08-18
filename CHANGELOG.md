@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/risk-guard` — deny patterns now also match normalized tool
+  names: camelCase is split (`placeOrder`), and namespaced names are checked
+  per segment (`mcp__ib__place_order`, `broker.place_order`, `exchange/sell`),
+  closing the systematic bypass where only textbook snake_case spellings were
+  caught. Anchors still anchor per candidate (`uniswap` never matches
+  `^swap`); the `allow` list still exempts the exact raw name. New export:
+  `nameCandidates`.
+
 ## 0.1.1 — 2026-08-17
 
 - `@dsh-trading/client-chart`: fix the scenario reader to match the published
@@ -11,6 +21,17 @@
   [#1](https://github.com/maddogfinance/dsh-trading/pull/1) — this project's
   first outside contribution.
 - All packages: add npm keywords for ecosystem discovery.
+=======
+## Unreleased
+
+- `@dsh-trading/risk-guard` — deny patterns now also match normalized tool
+  names: camelCase is split (`placeOrder`), and namespaced names are checked
+  per segment (`mcp__ib__place_order`, `broker.place_order`, `exchange/sell`),
+  closing the systematic bypass where only textbook snake_case spellings were
+  caught. Anchors still anchor per candidate (`uniswap` never matches
+  `^swap`); the `allow` list still exempts the exact raw name. New export:
+  `nameCandidates`.
+>>>>>>> d1a7a46 (risk-guard: match deny patterns against normalized tool names)
 
 ## 0.1.0 — 2026-08-17
 
