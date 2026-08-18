@@ -15,6 +15,7 @@ import type { Candle, Timeframe } from '@dsh-trading/market-data'
 import { ema, macd } from './candle-indicators.js'
 import { rsi, sma } from './indicators.js'
 import { regimeSnapshot, renderSnapshot } from './regime.js'
+import { compareSymbols, renderComparison } from './compare.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries } from './chart-payload.js'
@@ -23,6 +24,11 @@ import type { AnnotationRole, ChartAnnotation, ChartPayload, ChartScenario, Char
 export { rsi, sma } from './indicators.js'
 export { adx, atr, bollinger, ema, macd, mfi, stochastic } from './candle-indicators.js'
 export { regimeSnapshot, renderSnapshot } from './regime.js'
+export {
+  alignCandles, beta, compareSymbols, maxDrawdownPct, MIN_ALIGNED_BARS,
+  pctReturns, pearson, renderComparison,
+} from './compare.js'
+export type { AlignedSeries, Alignment, Comparison, ComparisonRow } from './compare.js'
 export type { RegimeSnapshot } from './regime.js'
 export { chartHtml, renderChartSvg } from './chart.js'
 export type { ChartLevel, ChartOptions, ChartOverlay } from './chart.js'
@@ -281,6 +287,68 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Indicator regime: ${args.symbol}`,
+      kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'compare_symbols',
+    description: 'Compare 2-8 instruments on one timeframe over their SHARED bars: total return, max drawdown, per-bar volatility, beta vs the first symbol, and a Pearson correlation matrix of per-bar returns. Call this when the question is relative — which is stronger, what moves together, what diversifies — instead of running market_snapshot per symbol and comparing by eye. Statistics are descriptive history over the aligned window, not forecasts.',
+    parameters: {
+      symbols: {
+        type: 'array', required: true, items: { type: 'string' },
+        description: 'Two to eight instrument symbols exactly as list_symbols reports them. The FIRST is the benchmark betas are computed against.',
+      },
+      timeframe: { type: 'string', enum: [...TIMEFRAMES], description: 'Bar interval. Default "1d".' },
+      bars: { type: 'integer', description: 'Bars fetched per symbol before alignment. Default 250, maximum 1000.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          provider: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          rendered: { type: 'string', required: true },
+          // The full Comparison, as an unconstrained JSON node: UI cards will
+          // read it, and adding a statistic must not be a wire-schema break.
+          comparison: { type: 'json', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Comparison from '${value.provider}':\n${value.rendered}`,
+      }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const symbols = [...new Set(args.symbols)]
+      if (symbols.length < 2 || symbols.length > 8) {
+        throw new Error(`compare_symbols needs 2..8 distinct symbols (got ${symbols.length})`)
+      }
+      if (args.bars !== undefined && (args.bars < 2 || args.bars > 1000)) {
+        throw new Error(`bars must be within 2..1000 (got ${args.bars})`)
+      }
+      const timeframe = (args.timeframe ?? '1d') as Timeframe
+      const bySymbol = await Promise.all(symbols.map(async (symbol) => {
+        const candles = await provider.getOhlcv({ symbol, timeframe, limit: args.bars ?? 250 })
+        if (candles.length === 0) throw new Error(`no candles for ${symbol} @ ${timeframe}`)
+        return { symbol, candles }
+      }))
+      const comparison = compareSymbols(bySymbol)
+      return {
+        provider: provider.id,
+        timeframe,
+        rendered: renderComparison(timeframe, comparison),
+        comparison,
+      }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Compare: ${args.symbols.join(', ')}`,
       kind: 'read',
       rawInput: args,
     }),

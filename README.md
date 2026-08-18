@@ -20,7 +20,7 @@ Five packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
-                              market_snapshot) + the indicator library
+                              market_snapshot, compare_symbols) + indicators
         │  consumes
         ▼
 @dsh-trading/market-data      the seam: ctx.marketData — typed candle/symbol interface
@@ -37,7 +37,7 @@ Five packages, one direction of dependency:
 
 - **`market-data`** defines the seam and nothing else (its only peer is cordis). Every consumer talks to `ctx.marketData`; every data source hides behind `MarketDataProvider`.
 - **`provider-csv`** is the *bring-your-own-data* template: ~100 lines, local `<root>/<symbol>/<timeframe>.csv` files. Copy it to put ClickHouse, a broker API, or CCXT behind the same interface — tools upstream never change.
-- **`tool-market`** registers read-only analysis tools on `ctx.tools`. `market_snapshot` returns a whole multi-timeframe indicator regime in one call (RSI, slow stochastic, ADX/DI, MACD, MFI, ATR, SMA/EMA posture, Bollinger) with coarse state labels; `get_ohlcv` serves raw bars when structure matters. The indicator math is pure and deterministic — textbook definitions with Wilder smoothing where Wilder defined it — so values reconcile against any charting platform and a session-log replay recomputes identical model-visible numbers.
+- **`tool-market`** registers read-only analysis tools on `ctx.tools`. `market_snapshot` returns a whole multi-timeframe indicator regime in one call (RSI, slow stochastic, ADX/DI, MACD, MFI, ATR, SMA/EMA posture, Bollinger) with coarse state labels; `get_ohlcv` serves raw bars when structure matters; `compare_symbols` answers the relative questions — total return, max drawdown, per-bar volatility, beta, and a correlation matrix over the bars 2–8 instruments actually share. The indicator math is pure and deterministic — textbook definitions with Wilder smoothing where Wilder defined it — so values reconcile against any charting platform and a session-log replay recomputes identical model-visible numbers.
 - **`bundle/trading`** wires the rows into a dsh profile via `cordis.patch.yml`. Users repoint or replace the `market-data-provider` row from their own profile patch — that row swap **is** the BYO mechanism.
 
 ## Why this and not another finance plugin?

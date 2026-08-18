@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/tool-market` — new `compare_symbols` tool: cross-instrument
+  comparison over the bars 2–8 symbols actually share (aligned on bar-open
+  instants, dropped bars reported): total return, max drawdown, per-bar
+  volatility (deliberately not annualized), beta vs the first symbol, and a
+  Pearson correlation matrix of per-bar returns. Flat series report null
+  correlation — undefined, never a number. Statistics are descriptive history,
+  not forecasts, and fewer than 20 shared bars are refused rather than
+  reported. The math lives in a pure, exported module (`compare.ts`).
+
 ## 0.1.1 — 2026-08-17
 
 - `@dsh-trading/client-chart`: fix the scenario reader to match the published

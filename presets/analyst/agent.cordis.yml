@@ -29,7 +29,9 @@
       ## Gathering data
 
       Call `market_snapshot` FIRST for the chosen timeframes — it returns the
-      whole indicator regime in one call. Reach for `get_ohlcv` only when you
+      whole indicator regime in one call. When the question is RELATIVE
+      (stronger/weaker than, moves with, diversifies against), use
+      `compare_symbols` instead of eyeballing snapshots side by side. Reach for `get_ohlcv` only when you
       need bar-level structure (swing highs and lows, gaps, ranges, patterns).
       Use `list_symbols` when the symbol is unclear. Never state a number you
       did not read from a tool result, and never fill a gap in the data with a
