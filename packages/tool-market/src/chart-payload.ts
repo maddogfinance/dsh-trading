@@ -153,7 +153,14 @@ export function chartSeries(series: ChartSeries, cap: number = CHART_META_BARS):
   return out
 }
 
-function roundSeries(values: (number | null)[], digits: number): (number | null)[] {
+/**
+ * Round one per-bar column to reporting precision. Exported because the
+ * contract (CONTRACTS.md §2.1) promises series values are rounded ONCE,
+ * producer-side — every column that enters a chart payload must pass through
+ * here, requested columns included, so no consumer ever sees a number the
+ * model could not have read.
+ */
+export function roundSeries(values: (number | null)[], digits: number): (number | null)[] {
   const f = 10 ** digits
   return values.map(v => v === null || !Number.isFinite(v) ? null : Math.round(v * f) / f)
 }

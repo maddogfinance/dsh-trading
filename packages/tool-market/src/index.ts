@@ -17,7 +17,7 @@ import { rsi, sma } from './indicators.js'
 import { regimeSnapshot, renderSnapshot } from './regime.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
-import { chartCandles, chartSeries, regimeSeries } from './chart-payload.js'
+import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
 import type { AnnotationRole, ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './chart-payload.js'
 
 export { rsi, sma } from './indicators.js'
@@ -45,6 +45,13 @@ export const Config: z<Config> = z.object({
 })
 
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'] as const
+
+/**
+ * Hard cap on bars served by one get_ohlcv call. The CSV block is rendered
+ * into model context; an uncapped limit lets a single call crowd out the
+ * analysis it was fetched for.
+ */
+const MAX_OHLCV_BARS = 2000
 
 /** Render candles (+ indicator columns) as the CSV block the model reads. */
 function renderCsv(candles: Candle[], indicators: Record<string, (number | null)[]>): string {
@@ -114,7 +121,7 @@ export function apply(ctx: Context, config: Config): void {
       timeframe: { type: 'string', required: true, enum: [...TIMEFRAMES], description: 'Bar interval.' },
       start: { type: 'string', description: 'Inclusive ISO-8601 range start (bar open time).' },
       end: { type: 'string', description: 'Inclusive ISO-8601 range end.' },
-      limit: { type: 'integer', description: 'Max bars, counted from the end of the range. Default 200.' },
+      limit: { type: 'integer', description: `Max bars, counted from the end of the range. Default 200, maximum ${MAX_OHLCV_BARS}.` },
       sma: { type: 'array', items: { type: 'integer' }, description: 'SMA windows to append as columns, e.g. [20, 50].' },
       rsi: { type: 'integer', description: 'RSI period to append as a column, e.g. 14.' },
       provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
@@ -158,6 +165,9 @@ export function apply(ctx: Context, config: Config): void {
     isConcurrencySafe: () => true,
     async execute(args, _exec) {
       const provider = ctx.marketData.provider(args.provider)
+      if (args.limit !== undefined && args.limit > MAX_OHLCV_BARS) {
+        throw new Error(`limit ${args.limit} exceeds the maximum ${MAX_OHLCV_BARS} bars per call — page through history with start/end ranges instead`)
+      }
       const timeframe = args.timeframe as (typeof TIMEFRAMES)[number]
       const candles = await provider.getOhlcv({
         symbol: args.symbol,
@@ -170,13 +180,19 @@ export function apply(ctx: Context, config: Config): void {
       const indicators: Record<string, (number | null)[]> = {}
       for (const window of args.sma ?? []) indicators[`sma${window}`] = sma(closes, window)
       if (args.rsi !== undefined) indicators[`rsi${args.rsi}`] = rsi(closes, args.rsi)
+      // Requested columns enter the payload at the same reporting precision
+      // regimeSeries uses (CONTRACTS §2.1: rounded once, producer-side) — a
+      // requested rsi14 must be byte-identical to the regime's rsi14, not a
+      // full-precision shadow of it.
+      const roundedIndicators = Object.fromEntries(Object.entries(indicators)
+        .map(([name, values]) => [name, roundSeries(values, name.startsWith('rsi') ? 2 : 4)]))
       const tail = chartCandles(candles)
       const chart: ChartTimeframeData | null = tail === null || tail.length === 0 ? null : {
         timeframe,
         candles: tail,
         indicators: regimeSnapshot(candles),
-        // Regime set first; requested columns win a name clash (same math anyway).
-        series: chartSeries({ ...regimeSeries(candles), ...indicators }),
+        // Regime set first; requested columns win a name clash (identical after rounding).
+        series: chartSeries({ ...regimeSeries(candles), ...roundedIndicators }),
       }
       return {
         provider: provider.id,
