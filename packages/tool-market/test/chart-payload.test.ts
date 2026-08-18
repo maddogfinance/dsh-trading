@@ -135,6 +135,27 @@ describe('tool wiring: model/UI split', () => {
     expect(tf.series!['macd_hist']!.length).toBe(tf.candles.length)
   })
 
+  it('get_ohlcv: requested columns enter the payload rounded (CONTRACTS §2.1), matching the regime precision', async () => {
+    const tool = captureTools(candles).get('get_ohlcv')!
+    const value = await tool.execute({ symbol: 'DEMO', timeframe: '1d', sma: [20], rsi: 14 }, {}) as never
+    const series = (tool.output.presentationMeta!({}, value) as ChartPayload).timeframes[0]!.series!
+    // rsi14 is a frozen v1 column name: the requested spelling must be
+    // byte-identical to what regimeSeries would publish, not a
+    // full-precision shadow of it.
+    for (const v of series['rsi14']!) {
+      if (v !== null) expect(v).toBe(Math.round(v * 100) / 100)
+    }
+    for (const v of series['sma20']!) {
+      if (v !== null) expect(v).toBe(Math.round(v * 10_000) / 10_000)
+    }
+  })
+
+  it('get_ohlcv: refuses a limit beyond the cap instead of flooding model context', async () => {
+    const tool = captureTools(candles).get('get_ohlcv')!
+    await expect(tool.execute({ symbol: 'DEMO', timeframe: '1d', limit: 5000 }, {}))
+      .rejects.toThrow(/limit 5000 exceeds the maximum 2000 bars per call/)
+  })
+
   it('get_ohlcv: no candles means a null meta, not a broken payload', async () => {
     const tool = captureTools([]).get('get_ohlcv')!
     const value = await tool.execute({ symbol: 'DEMO', timeframe: '1d' }, {}) as never

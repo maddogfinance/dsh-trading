@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/tool-market` — two `get_ohlcv` contract fixes: requested
+  indicator columns (`sma`, `rsi`) now enter the chart payload rounded to the
+  same reporting precision as the regime series, so a requested `rsi14` is
+  byte-identical to the frozen v1 column instead of a full-precision shadow
+  of it (CONTRACTS §2.1: rounded once, producer-side); and `limit` is capped
+  at 2000 bars per call — the CSV block is model-facing text, and an uncapped
+  limit let a single call crowd out the analysis it was fetched for.
+  `roundSeries` is now exported.
+
 ## 0.1.1 — 2026-08-17
 
 - `@dsh-trading/client-chart`: fix the scenario reader to match the published
