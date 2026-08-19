@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- New package `@dsh-trading/verdict` 0.1.0 — the evaluation harness, first
+  slice of the back half (docs/EVALUATION-HARNESS-ROADMAP.md). Two tools:
+  `audit_backtest` checks a backtest artifact (CONTRACTS §6) against real
+  candles from the market-data seam — fill validation inside the true bar
+  range, trade-independence (duplicates/overlaps collapse to effective
+  samples), a seeded random-entry baseline ranked on close-to-close SHADOW
+  returns (optimistic intrabar fills can't buy a percentile; the
+  self-reported vs shadow gap is its own check), sample-size power on both
+  the win-rate and mean-return dimensions, win-rate plausibility, and cost
+  declaration — and `lint_strategy_code` scans sources for lookahead-leak
+  patterns (`shift(-n)`, `center=True`, backfill, full-data scaler fits;
+  comment-line hits downgrade to warnings). Verdicts are deterministic
+  (fixed seed, plain code, no LLM grading) and tri-state: DEFECTS_FOUND /
+  NOT_PROVEN / NO_DEFECTS_FOUND — a skipped substantive check caps the
+  verdict at NOT_PROVEN, and every report prints the harness's own blind
+  spots (in-sample selection, omitted trades, intrabar fills). Hardened by
+  an adversarial review before release: candle fetches pad by whole bars so
+  the first trade's entry bar is never cropped; times beyond the data window
+  are flagged, not silently validated against the last bar. Wired into the
+  bundle; remove the `verdict` row to opt out.
+
 - `@dsh-trading/tool-market` — two `get_ohlcv` contract fixes: requested
   indicator columns (`sma`, `rsi`) now enter the chart payload rounded to the
   same reporting precision as the regime series, so a requested `rsi14` is

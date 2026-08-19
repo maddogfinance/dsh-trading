@@ -16,7 +16,7 @@ against the real candle window. All footage is a live session, no mockups.
 
 ## Design
 
-Five packages, one direction of dependency:
+Six packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
@@ -30,6 +30,12 @@ Five packages, one direction of dependency:
 
 @dsh-trading/risk-guard       independent: refuses execution-shaped tool names
                               from any plugin, at dsh's tools/pre-execute gate
+
+@dsh-trading/verdict          the evaluation harness: audit_backtest validates
+                              fills against real candles, runs a seeded
+                              random baseline and sample-size power check;
+                              lint_strategy_code hunts lookahead leaks.
+                              Verdicts may honestly be NOT PROVEN.
 
 @dsh-trading/client-chart     web-only: candlestick cards for market_snapshot /
                               get_ohlcv results in dsh web (no host capability)

@@ -116,7 +116,37 @@ registerAnnotationRenderer('elliott_wave', (annotation, ctx) => [
   a host without your renderer shows the textual fallback row instead. The
   durable payload, not the pixels, is the record.
 
-## 6. Deferred (design notes, not yet contracts)
+## 6. Backtest artifact — version 1
+
+The shape `@dsh-trading/verdict`'s `audit_backtest` audits; any engine can
+produce it (the planned `@dsh-trading/backtest` and `reference-packs` will).
+Additive-only within version 1; readers MUST ignore unknown fields.
+
+```jsonc
+{
+  "version": 1,
+  "symbol": "DEMO-EQ",          // exactly as the provider reports it
+  "timeframe": "1d",            // one of the Timeframe values in §1
+  "trades": [{
+    "entryTime": "2026-01-02T10:00:00Z",  // ISO-8601 UTC, any instant INSIDE the entry bar
+    "exitTime":  "2026-01-05T14:00:00Z",
+    "side": "long",                        // or "short"
+    "entryPrice": 100.0,
+    "exitPrice": 104.2
+  }],
+  "costs": { "included": false },          // optional; omit = gross returns
+  "source": { "engine": "my-backtester" }  // optional provenance
+}
+```
+
+- Per-trade return convention is entry-notional: long `exit/entry - 1`,
+  short `(entry - exit)/entry`.
+- Producers should emit fills obtainable at the declared timeframe
+  (next-bar-open style); `audit_backtest` ranks strategies by close-to-close
+  shadow returns and reports self-reported vs shadow as the fill-model gap,
+  so optimistic intrabar pricing surfaces instead of scoring.
+
+## 7. Deferred (design notes, not yet contracts)
 
 - **Watch/alert**: a `kind:'watch'` payload naming price-cross conditions is
   the sketch; evaluation source, close-vs-tick semantics, delivery

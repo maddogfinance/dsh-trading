@@ -18,6 +18,12 @@
       config:
         chartDir: ./charts
 
+    # The evaluation harness: audit_backtest / lint_strategy_code judge
+    # backtest artifacts against real candles — deterministic checks whose
+    # verdict is allowed to be NOT PROVEN.
+    - id: verdict
+      name: '@dsh-trading/verdict'
+
     # Refuses order-execution and fund-movement tool names from ANY plugin in
     # this profile, not just ours. Remove this row to opt out deliberately.
     - id: risk-guard
