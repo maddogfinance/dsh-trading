@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/tool-market",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Model-facing market analysis tools (list_symbols, get_ohlcv) over the @dsh-trading/market-data seam",
   "type": "module",
   "license": "MIT",

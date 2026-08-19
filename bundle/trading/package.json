@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/bundle",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "DeepSeek Harness bundle wiring the dsh-trading research stack into a profile",
   "type": "module",
   "license": "MIT",

@@ -29,6 +29,9 @@ importers:
       '@dsh-trading/tool-market':
         specifier: workspace:^
         version: link:../../packages/tool-market
+      '@dsh-trading/verdict':
+        specifier: workspace:^
+        version: link:../../packages/verdict
 
   packages/client-chart:
     dependencies:

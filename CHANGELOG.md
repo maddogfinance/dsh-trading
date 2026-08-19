@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-08-19
 
-- New package `@dsh-trading/verdict` 0.1.0 — the evaluation harness, first
+- New package `@dsh-trading/verdict` — the evaluation harness, first
   slice of the back half (docs/EVALUATION-HARNESS-ROADMAP.md). Two tools:
   `audit_backtest` checks a backtest artifact (CONTRACTS §6) against real
   candles from the market-data seam — fill validation inside the true bar
