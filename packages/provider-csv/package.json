@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/provider-csv",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Reference bring-your-own-data provider: local CSV candle files behind the @dsh-trading/market-data seam",
   "type": "module",
   "license": "MIT",

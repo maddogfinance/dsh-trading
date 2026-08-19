@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/verdict",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Evaluation harness for backtest artifacts: lookahead lint, fill validation against real candles, seeded random baseline, sample-size power — deterministic checks that say NOT PROVEN when the evidence can't",
   "type": "module",
   "license": "MIT",

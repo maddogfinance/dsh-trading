@@ -1,6 +1,6 @@
 {
   "name": "@dsh-trading/client-chart",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Interactive candlestick cards for dsh web: market_snapshot and get_ohlcv results render as K-line charts with MA overlays, volume, and the indicator regime the model actually read",
   "type": "module",
   "license": "MIT",

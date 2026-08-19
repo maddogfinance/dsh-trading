@@ -1,6 +1,6 @@
 # Evaluation harness roadmap — the back half of dsh-trading
 
-*Status: living document. Added 2026-08-19 alongside `@dsh-trading/verdict` 0.1.0.*
+*Status: living document. Added 2026-08-19 alongside `@dsh-trading/verdict` 0.2.0.*
 
 ## Why
 
@@ -39,7 +39,7 @@ That detection layer is this roadmap.
 
 | package | role | status |
 |---|---|---|
-| `@dsh-trading/verdict` | the auditor: lookahead lint, fill validation, random baseline, sample-size power, verdict report | **0.1.0 (this release)** |
+| `@dsh-trading/verdict` | the auditor: lookahead lint, fill validation, trade independence, random baseline, fill-model gap, sample-size power, verdict report | **0.2.0 (this release)** |
 | `@dsh-trading/backtest` | deterministic backtest engine: explicit fill semantics (next-bar-open default), cost model, walk-forward/OOS splits as first-class citizens | planned |
 | `@dsh-trading/reference-packs` | published reference strategies + metrics so users can calibrate their own harness; also the container for public audit articles (each audit = a pack = a live demo) | planned |
 | `client-chart` verdict card | render `VerdictReport` as an interactive card (the "meta-dashboard") | planned |
@@ -56,7 +56,7 @@ Three outcomes, none of which is "this strategy works":
 
 ## Near-term sequence
 
-1. `verdict` 0.1: three checkers + report (shipped with this doc).
+1. `verdict` 0.2.0: the checkers above + the tri-state report (shipped with this doc).
 2. First reference pack: a public audit of a widely-claimed setup
    (candidates: ICT killzone/time-window claims on ES; the Market Profile
    "80% rule") — produced *by* the harness, published *with* the harness.
