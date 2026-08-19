@@ -21,7 +21,8 @@
     "@dsh-trading/market-data": "workspace:^",
     "@dsh-trading/provider-csv": "workspace:^",
     "@dsh-trading/risk-guard": "workspace:^",
-    "@dsh-trading/tool-market": "workspace:^"
+    "@dsh-trading/tool-market": "workspace:^",
+    "@dsh-trading/verdict": "workspace:^"
   },
   "repository": {
     "type": "git",

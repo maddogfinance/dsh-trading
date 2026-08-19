@@ -1,0 +1,57 @@
+{
+  "name": "@dsh-trading/verdict",
+  "version": "0.1.0",
+  "description": "Evaluation harness for backtest artifacts: lookahead lint, fill validation against real candles, seeded random baseline, sample-size power — deterministic checks that say NOT PROVEN when the evidence can't",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maddogfinance/dsh-trading.git",
+    "directory": "packages/verdict"
+  },
+  "homepage": "https://github.com/maddogfinance/dsh-trading#readme",
+  "bugs": "https://github.com/maddogfinance/dsh-trading/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "trading",
+    "backtest",
+    "evaluation",
+    "lookahead-bias",
+    "research"
+  ]
+}
