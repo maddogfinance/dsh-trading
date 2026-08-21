@@ -7,6 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getLatestChart, publishLatestChart, subscribeLatestChart } from '../src/client/latest.js'
+import { annotationDigest } from '../src/client/payload.js'
 import type { ChartPayload } from '../src/client/payload.js'
 
 function payload(symbol: string): ChartPayload {
@@ -75,5 +76,42 @@ describe('latest chart store', () => {
     publishLatestChart(first)
     publishLatestChart(second)
     expect(getLatestChart()).toBe(second)
+  })
+})
+
+describe('seriesKey identity (regression)', () => {
+  it('distinguishes two windows of the same instrument carrying the same marks', () => {
+    // The panel swaps the agent's short window for the user's long one while
+    // the marks ride along. Keyed on marks alone the two are byte-identical,
+    // so the chart never re-inits and keeps the old candles under the new
+    // caption. The left edge is what tells them apart — and a live tail can
+    // never change it, because mergeTail only replaces or appends at the end.
+    const marks = annotationDigest([{ type: 'level', price: 100 }] as never, [])
+    const short = `futu|US.MU|1d|2026-08-01T00:00:00.000Z|${marks}`
+    const long = `futu|US.MU|1d|2024-08-01T00:00:00.000Z|${marks}`
+    expect(short).not.toBe(long)
+  })
+})
+
+describe('annotationDigest', () => {
+  it('differs when the same annotation types carry different prices', () => {
+    // The exact collision the old type-list key had: three levels replaced by
+    // three different levels produced a byte-identical key, so the canvas kept
+    // the old prices while the table printed the new ones.
+    const a = [{ type: 'level', price: 100 }] as never
+    const b = [{ type: 'level', price: 101 }] as never
+    expect(annotationDigest(a, [])).not.toBe(annotationDigest(b, []))
+  })
+
+  it('differs when the same scenario count carries different trigger prices', () => {
+    const s = (p: number) => [{
+      direction: 'bull' as const, stance: 'base' as const,
+      thesis: 't', trigger: 'x', invalidation: 'y', triggerPrice: p,
+    }]
+    expect(annotationDigest([], s(10))).not.toBe(annotationDigest([], s(11)))
+  })
+
+  it('is stable for equal content', () => {
+    expect(annotationDigest([], [])).toBe(annotationDigest(undefined, undefined))
   })
 })

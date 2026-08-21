@@ -18,7 +18,7 @@ import { dispose, init, registerIndicator, registerOverlay } from 'klinecharts'
 import type { Chart, OverlayCreateFiguresCallbackParams } from 'klinecharts'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { publishLatestChart } from './latest.js'
-import { contentText, readChartPayload } from './payload.js'
+import { annotationDigest, contentText, readChartPayload } from './payload.js'
 import type { ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './payload.js'
 
 const CHART_HEIGHT = 320
@@ -210,8 +210,19 @@ function ensureRegistered(): void {
     },
   } as never)
   registerOverlay({
+    // totalStep MUST be 2, and 2 is klinecharts' minimum (a lower value is
+    // coerced to 1). The library treats an overlay as still being drawn until
+    // `points.length >= totalStep - 1`; at 14 a 12-point path (the producer's
+    // cap) never finishes, and an unfinished overlay is parked in the store's
+    // single in-progress slot rather than the instance list — so only the LAST
+    // path ever reaches the chart and the earlier ones vanish while the table
+    // below still lists them. Worse, the in-progress path follows the cursor
+    // (the mouse-move handler does not check `lock`) and bakes a junk vertex in
+    // on every click. Harmless in a chat bubble nobody hovers; permanent in an
+    // always-on column. We never draw interactively — drawPrimitive always
+    // supplies the whole point list — so finishing immediately loses nothing.
     name: 'tm_polyline',
-    totalStep: 14,
+    totalStep: 2,
     lock: true,
     createPointFigures: ({ coordinates, overlay }: OverlayCreateFiguresCallbackParams) => {
       if (coordinates.length < 2) return []
@@ -539,10 +550,20 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
     .filter((r): r is NonNullable<typeof r> => r !== null)
 
   // What counts as "a different chart" for rebuild purposes: the instrument,
-  // the interval, and the marks drawn on it. A tail tick changes none of these,
-  // which is exactly why a live poll does not rebuild the canvas.
-  const annotationKey = (tf.annotations ?? []).map(a => a.type).join(',')
-  const seriesKey = `${payload.symbol}|${tf.timeframe}|${annotationKey}|${scenarios.length}`
+  // the interval, and the exact marks drawn on it. A tail tick changes none of
+  // these, which is why a live poll does not rebuild the canvas — `withCandles`
+  // spreads `{ ...tf, candles }`, so the annotations array keeps its identity.
+  //
+  // Deliberately a plain call, not a useMemo: these lines sit after an early
+  // return, and a hook past a conditional return breaks the rules of hooks.
+  // The series' LEFT EDGE is in the key too. Without it, swapping one window
+  // for another of the same instrument, interval and marks — exactly what
+  // happens when the panel replaces the agent's 200-bar payload with the
+  // user's 1000-bar series — produces a byte-identical key, so the init effect
+  // never re-runs, applyNewData is never called, and the canvas keeps the old
+  // candles under the new caption. A live tail cannot change this value:
+  // mergeTail only replaces the forming bar or appends a new one.
+  const seriesKey = `${payload.provider}|${payload.symbol}|${tf.timeframe}|${tf.candles[0]?.time ?? ''}|${annotationDigest(tf.annotations, scenarios)}`
 
   const root: CSSProperties = fill
     ? { ...shell, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }
