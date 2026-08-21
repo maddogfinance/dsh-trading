@@ -205,3 +205,42 @@ describe('describeChartView', () => {
     expect(line).toContain('paused')
   })
 })
+
+describe('marks reported through the view', () => {
+  const VIEW = { symbol: 'US.MU', timeframe: '1d', bars: 1000, live: true, origin: 'user' }
+
+  it('clamps the mark counts and keeps a known timeframe', () => {
+    const v = readChartView({ ...VIEW, marks: 4, marksDropped: 1, marksTimeframe: '1d' })
+    expect(v).toMatchObject({ marks: 4, marksDropped: 1, marksTimeframe: '1d' })
+    const clamped = readChartView({ ...VIEW, marks: 1e9, marksDropped: -3 })
+    expect(clamped).toMatchObject({ marks: 100, marksDropped: 0 })
+  })
+
+  it('refuses a timeframe outside the known set', () => {
+    const v = readChartView({ ...VIEW, marks: 2, marksTimeframe: 'yearly' })
+    expect(typeof v === 'object' && v.marksTimeframe).toBeUndefined()
+  })
+
+  it('leaves all three absent when the panel sent none', () => {
+    const v = readChartView(VIEW) as Record<string, unknown>
+    expect(v['marks']).toBeUndefined()
+    expect(v['marksDropped']).toBeUndefined()
+    expect(v['marksTimeframe']).toBeUndefined()
+  })
+
+  it('tells the model its marks are drawn, and how many were refused', () => {
+    // Whether the drawing landed is the one thing the agent cannot infer:
+    // annotate_chart returning successfully says nothing about what the user's
+    // column decided to render.
+    const line = describeChartView({
+      symbol: 'US.MU', timeframe: '1d', bars: 1000, live: true, origin: 'user',
+      marks: 4, marksDropped: 1, marksTimeframe: '1d',
+    })
+    expect(line).toMatch(/marks are drawn on it \(4 from the 1d analysis; 1 fell outside/)
+  })
+
+  it('says nothing about marks when there are none', () => {
+    const line = describeChartView({ symbol: 'US.MU', timeframe: '1d', bars: 10, live: false, origin: 'user' })
+    expect(line).not.toMatch(/marks/)
+  })
+})

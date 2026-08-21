@@ -16,13 +16,13 @@
  * yank the chart out from under someone mid-read. "Follow the agent" is a
  * toggle, not a surprise.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import type { ChartOwnerProps } from '@dsh-trading/client-frame/client'
 import { ChartBody } from './ChartCard.js'
 import { getLatestChart, subscribeLatestChart } from './latest.js'
-import { mergeTail, withCandles } from './market-client.js'
-import type { MarketClient } from './market-client.js'
+import { mergeMarks, mergeTail, readMarks, withCandles } from './market-client.js'
+import type { ChartMarks, MarketClient } from './market-client.js'
 import type { ChartPayload } from './payload.js'
 
 /** Timeframes the panel offers; the provider may serve a subset and will say so. */
@@ -130,12 +130,40 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   const [hint, setHint] = useState<string | null>(null)
   const [live, setLive] = useState(true)
   const [tick, setTick] = useState<string | null>(null)
+  const [marks, setMarks] = useState<ChartMarks | null>(null)
+  const [dismissed, setDismissed] = useState<string | null>(null)
   const inflight = useRef<AbortController | null>(null)
   const quiet = useRef(0)
 
+  // Adopt whatever the agent last DREW, separately from what it last fetched.
+  // Keyed on content, not identity: `latest` republishes the same payload
+  // whenever an old card scrolls back into view, and an identical republish
+  // must not disturb the chart or re-arm a dismissal.
+  useEffect(() => {
+    const next = readMarks(fromAgent)
+    if (next === null) return
+    setMarks(cur => {
+      if (cur !== null && cur.key === next.key) return cur
+      // A dismissal is about the marks that were on screen when it was
+      // clicked, not a standing veto. Without this, adopting a different set
+      // while an old key is dismissed hides the pill too — and with the pill
+      // goes the only way back to the drawing.
+      setDismissed(null)
+      return next
+    })
+  }, [fromAgent])
+
+  const active = marks !== null && marks.key !== dismissed ? marks : null
+  const merged = useMemo(
+    () => own !== null && active !== null ? mergeMarks(own, active) : null,
+    [own, active],
+  )
+
   // The panel's own lookup takes precedence: an agent answer arriving mid-read
-  // must not replace what the user deliberately put on screen.
-  const payload = own ?? fromAgent
+  // must not replace what the user deliberately put on screen. Its DRAWINGS
+  // are welcome on top of it, which is what `merged` carries; when they are
+  // about a different chart, mergeMarks hands the payload straight back.
+  const payload = merged?.payload ?? own ?? fromAgent
 
   const load = useCallback(async (symbol: string, tf: string) => {
     inflight.current?.abort()
@@ -195,12 +223,22 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
         close: last?.close,
         live,
         origin: own !== null ? 'user' : 'agent',
+        // Whether the agent's drawings actually landed is the one thing it
+        // cannot infer: annotate_chart returning successfully says nothing
+        // about what this column decided to render.
+        ...merged?.applied === true && merged.kept > 0
+          ? {
+              marks: merged.kept,
+              marksDropped: merged.dropped,
+              ...active !== null ? { marksTimeframe: active.timeframe } : {},
+            }
+          : {},
       })
     }
     publish()
     const beat = setInterval(publish, VIEW_HEARTBEAT_MS)
     return () => clearInterval(beat)
-  }, [payload, width, live, own, market])
+  }, [payload, width, live, own, market, merged, active])
 
   // Live tail. Deliberately a poll rather than a push: the host channel is
   // unary, and a chart that is at most a few seconds stale is worth far less
@@ -230,14 +268,14 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
         setOwn(current => {
           if (current === null) return current
           const series = current.timeframes[0]?.candles ?? []
-          const merged = mergeTail(series, tail)
-          if (merged === series) {
+          const nextSeries = mergeTail(series, tail)
+          if (nextSeries === series) {
             quiet.current += 1
             return current
           }
           quiet.current = 0
           setTick(new Date().toLocaleTimeString())
-          return withCandles(current, merged)
+          return withCandles(current, nextSeries)
         })
       } catch {
         // A transient provider hiccup must not kill the live loop or replace a
@@ -275,6 +313,70 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     if (symbol !== '') void load(symbol, tf)
   }
 
+  // The agent's drawings, and what to do about them. Suppressed while the body
+  // is showing a loading or error screen: `own` survives a failed lookup, so a
+  // pill there would claim marks over an error message.
+  const showPill = active !== null && own !== null && error === null && !(busy && payload === null)
+  // Scenarios draw their own trigger/invalidation lines, so a scenario-only
+  // analysis is not "0 marks".
+  const markCount = active === null ? 0 : active.annotations.length + active.scenarios.length
+  const offerable = active !== null
+    && TIMEFRAMES.includes(active.timeframe as (typeof TIMEFRAMES)[number])
+    && own?.provider === active.provider
+  const marksPill = !showPill || active === null ? null : (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      {merged?.applied === true
+        ? (
+          <span
+            style={{ ...TF_BUTTON(true), cursor: 'default' }}
+            title={
+              `Drawn by the agent's annotate_chart on the ${active.timeframe} analysis.`
+              + (merged.dropped > 0
+                ? ` ${merged.dropped} fell outside this window's price range or bar span and are not shown.`
+                : '')
+            }
+          >
+            ✎ {merged.kept} marks · {active.timeframe} · {active.at}
+            {merged.dropped > 0 ? ` · ${merged.dropped} off-window` : ''}
+          </span>
+        )
+        : offerable
+          ? (
+            <button
+              type="button"
+              style={TF_BUTTON(false)}
+              title={`The agent drew on ${active.rawSymbol} ${active.timeframe}. Load that chart here to see the marks.`}
+              onClick={() => {
+                setDraft(active.rawSymbol)
+                setTimeframe(active.timeframe)
+                void load(active.rawSymbol, active.timeframe)
+              }}
+            >
+              ✎ {active.rawSymbol} {active.timeframe} · {markCount} marks — Show
+            </button>
+          )
+          : (
+            <span
+              style={{ ...TF_BUTTON(false), cursor: 'default' }}
+              title={
+                `The agent drew on ${active.rawSymbol} ${active.timeframe}, which this panel cannot load `
+                + `(different provider, or a timeframe outside its picker).`
+              }
+            >
+              ✎ {active.rawSymbol} {active.timeframe} · not on this chart
+            </span>
+          )}
+      <button
+        type="button"
+        style={{ ...TF_BUTTON(false), padding: '2px 5px' }}
+        title="Dismiss the agent's marks until it draws new ones"
+        onClick={() => setDismissed(active.key)}
+      >
+        ×
+      </button>
+    </span>
+  )
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <form style={BAR} onSubmit={submit}>
@@ -293,6 +395,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
             {tf}
           </button>
         ))}
+        {marksPill}
         <button
           type="button"
           style={{ ...TF_BUTTON(live), marginLeft: 'auto' }}
