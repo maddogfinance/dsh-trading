@@ -1,0 +1,57 @@
+{
+  "name": "@dsh-trading/provider-futu",
+  "version": "0.2.0",
+  "description": "Live HK/US/A-share candles from a local Futu OpenD, behind the @dsh-trading/market-data seam",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^",
+    "futu-api": "*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^",
+    "@types/node": "^22.10.0",
+    "futu-api": "10.9.6908",
+    "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maddogfinance/dsh-trading.git",
+    "directory": "packages/provider-futu"
+  },
+  "homepage": "https://github.com/maddogfinance/dsh-trading#readme",
+  "bugs": "https://github.com/maddogfinance/dsh-trading/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "trading",
+    "market-data",
+    "futu",
+    "opend",
+    "research"
+  ]
+}
