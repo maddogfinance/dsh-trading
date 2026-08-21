@@ -26,7 +26,8 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-tool"
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-connection"
       ]
     }
   },
@@ -35,13 +36,22 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "@dsh-trading/client-frame": "^0.2.0",
+    "@dsh-trading/market-data": "workspace:^",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/client-frame": "workspace:*",
+    "@dsh-trading/market-data": "workspace:^",
     "@types/react": "^18.3.0",
     "esbuild": "^0.24.0",
     "react": "^18.3.1",
@@ -65,5 +75,10 @@
     "market-data",
     "technical-analysis",
     "research"
-  ]
+  ],
+  "peerDependenciesMeta": {
+    "@dsh-trading/client-frame": {
+      "optional": true
+    }
+  }
 }

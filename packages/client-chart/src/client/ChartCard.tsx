@@ -17,8 +17,9 @@ import type { CSSProperties } from 'react'
 import { dispose, init, registerIndicator, registerOverlay } from 'klinecharts'
 import type { Chart, OverlayCreateFiguresCallbackParams } from 'klinecharts'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import { publishLatestChart } from './latest.js'
 import { contentText, readChartPayload } from './payload.js'
-import type { ChartAnnotation, ChartScenario, ChartTimeframeData } from './payload.js'
+import type { ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './payload.js'
 
 const CHART_HEIGHT = 320
 const PANE_HEIGHT = 90
@@ -335,14 +336,29 @@ function drawPrimitive(chart: Pick<Chart, 'createOverlay'>, prim: DrawPrimitive)
   }
 }
 
-function Kline({ data, scenarios, dark, active }: {
+function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HEIGHT, fill = false }: {
   data: ChartTimeframeData
   scenarios: ChartScenario[]
   dark: boolean
   active: string[]
+  /**
+   * Identity of the SERIES being drawn — symbol, timeframe, and anything else
+   * that means "a different chart". The plot is rebuilt when this changes and
+   * only then; a live tail update keeps the same key and rides
+   * {@link Chart.updateData} instead, so a polling panel does not tear the
+   * canvas down twice a second.
+   */
+  seriesKey: string
+  baseHeight?: number
+  /** Take the height the parent flex column leaves, instead of a fixed plot height. */
+  fill?: boolean
 }): JSX.Element {
   const el = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<Chart | null>(null)
+  const latest = useRef(data)
+  latest.current = data
   const paneCount = active.filter(id => CHIP_DEFS.find(d => d.id === id)?.indicator?.overlay !== true).length
+
   useEffect(() => {
     const container = el.current
     if (container === null) return
@@ -350,6 +366,8 @@ function Kline({ data, scenarios, dark, active }: {
     const palette = dark ? DARK : LIGHT
     const chart = init(container)
     if (chart === null) return
+    chartRef.current = chart
+    const data = latest.current
     chart.setStyles(klineStyles(palette))
     chart.applyNewData(data.candles.map(c => ({
       timestamp: Date.parse(c.time),
@@ -383,10 +401,34 @@ function Kline({ data, scenarios, dark, active }: {
     observer.observe(container)
     return () => {
       observer.disconnect()
+      chartRef.current = null
       dispose(container)
     }
-  }, [data, scenarios, dark, active])
-  return <div ref={el} style={{ height: CHART_HEIGHT + paneCount * PANE_HEIGHT, width: '100%' }} />
+    // Deliberately NOT keyed on `data`: see `seriesKey`. Annotation and
+    // scenario identity are folded into the key by the caller, so a redraw
+    // still happens when the model marks the chart up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seriesKey, dark, active])
+
+  // Live tail: push the newest bar into the existing plot. klinecharts updates
+  // the last bar in place, or appends when the timestamp has moved on, so the
+  // same call covers "the current candle ticked" and "a new candle opened".
+  useEffect(() => {
+    const chart = chartRef.current
+    const last = data.candles[data.candles.length - 1]
+    if (chart === null || last === undefined) return
+    chart.updateData({
+      timestamp: Date.parse(last.time),
+      open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume,
+    })
+  }, [data])
+  // In fill mode the plot is sized by the flex parent and the ResizeObserver
+  // above keeps klinecharts in step; `minHeight` is the floor below which a
+  // candlestick chart stops being a chart. Indicator panes then divide the
+  // available height rather than extending the card downward.
+  return fill
+    ? <div ref={el} style={{ flex: '1 1 auto', minHeight: 240, width: '100%' }} />
+    : <div ref={el} style={{ height: baseHeight + paneCount * PANE_HEIGHT, width: '100%' }} />
 }
 
 function fmt(x: unknown): string {
@@ -441,28 +483,41 @@ function annotationRow(a: ChartAnnotation, close: number, p: Palette): { key: st
   return { key: `x:${a.type}:${label}`, color: p.faint, label, where: known ? a.type : `${a.type} (no renderer installed)`, distance: '', sources }
 }
 
-export function ChartCard(props: ToolCallViewProps): JSX.Element {
-  const { block, toolName } = props
+/**
+ * The chart itself, driven by a payload and nothing else. Split out of
+ * ChartCard so the same body serves two very different seats: the tool-call
+ * card inside a chat bubble, and the persistent column of the trading frame.
+ * It knows nothing about tool calls, blocks, or slots.
+ *
+ * @param payload - the durable chart payload to render.
+ * @param chartHeight - base plot height in px; the panel gives it more room
+ *   than a chat bubble can afford.
+ * @param shell - container style, so the panel can drop the card's border and
+ *   margins and sit flush in its column.
+ */
+export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, fill = false }: {
+  payload: ChartPayload
+  chartHeight?: number
+  shell?: CSSProperties
+  /**
+   * Fill the parent's height rather than stacking to a natural height. The
+   * chat bubble wants the latter (it shares a scrolling column); the frame's
+   * chart column wants the former — a workbench that leaves half its column
+   * empty is wasting the width it was given.
+   */
+  fill?: boolean
+}): JSX.Element {
   const dark = useDark()
   const [activeTf, setActiveTf] = useState(0)
   const [activeChips, setActiveChips] = useState<string[]>([])
 
-  const payload = 'kind' in block && !block.isError ? readChartPayload(block.meta) : null
-  const tf = payload === null
-    ? undefined
-    : payload.timeframes[Math.min(activeTf, payload.timeframes.length - 1)]
+  const tf = payload.timeframes[Math.min(activeTf, payload.timeframes.length - 1)]
   const activeKey = useMemo(() => [...activeChips].sort().join(','), [activeChips])
   const activeList = useMemo(() => activeKey === '' ? [] : activeKey.split(','), [activeKey])
-  const scenarios = useMemo(() => payload?.scenarios ?? [], [payload])
+  const scenarios = useMemo(() => payload.scenarios ?? [], [payload])
 
-  if (!('kind' in block)) {
-    return <div style={SHELL}>{toolName} …</div>
-  }
-  if (block.isError) {
-    return <Fallback text={contentText(block.content) || `${toolName} failed`} error />
-  }
-  if (payload === null || tf === undefined) {
-    return <Fallback text={contentText(block.content)} error={false} />
+  if (tf === undefined) {
+    return <Fallback text={`${payload.symbol}: no timeframes in payload`} error={false} />
   }
 
   const last = tf.candles[tf.candles.length - 1]!
@@ -483,9 +538,19 @@ export function ChartCard(props: ToolCallViewProps): JSX.Element {
     .map(a => annotationRow(a, last.close, palette))
     .filter((r): r is NonNullable<typeof r> => r !== null)
 
+  // What counts as "a different chart" for rebuild purposes: the instrument,
+  // the interval, and the marks drawn on it. A tail tick changes none of these,
+  // which is exactly why a live poll does not rebuild the canvas.
+  const annotationKey = (tf.annotations ?? []).map(a => a.type).join(',')
+  const seriesKey = `${payload.symbol}|${tf.timeframe}|${annotationKey}|${scenarios.length}`
+
+  const root: CSSProperties = fill
+    ? { ...shell, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }
+    : shell
+
   return (
-    <div style={SHELL}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+    <div style={root}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8, marginBottom: 8, flex: '0 0 auto' }}>
         <strong style={{ fontSize: 13 }}>{payload.symbol}</strong>
         <span style={{ color: palette.faint }}>{tf.timeframe} · {tf.candles.length} bars · {payload.provider}</span>
         <span>close {last.close}</span>
@@ -510,7 +575,16 @@ export function ChartCard(props: ToolCallViewProps): JSX.Element {
             </span>
           : null}
       </div>
-      <Kline data={tf} scenarios={scenarios} dark={dark} active={activeList} />
+      <Kline
+        data={tf}
+        scenarios={scenarios}
+        dark={dark}
+        active={activeList}
+        seriesKey={seriesKey}
+        baseHeight={chartHeight}
+        fill={fill}
+      />
+      <div style={fill ? { flex: '0 1 auto', minHeight: 0, overflowY: 'auto' } : undefined}>
       {chipRow.length > 0
         ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {chipRow.map(chip => chip.togglable
@@ -583,6 +657,39 @@ export function ChartCard(props: ToolCallViewProps): JSX.Element {
       <div style={{ color: palette.faint, marginTop: 6, fontSize: 11 }}>
         {first.time} … {last.time} · chips toggle indicator panes drawn from the exact per-bar series the model read · scenarios are research hypotheses, not recommendations
       </div>
+      </div>
     </div>
   )
+}
+
+/**
+ * The tool-call seat's adapter: unwrap a `market_snapshot` / `get_ohlcv` /
+ * `annotate_chart` result into a payload and hand it to {@link ChartBody},
+ * degrading to the rendered text when the payload is absent.
+ *
+ * It also PUBLISHES each payload it sees to the latest-chart store, which is
+ * what lifts the model's chart out of the chat bubble and into the frame's
+ * persistent column. Publishing from render (via an effect) rather than from
+ * the tool pipeline keeps the seam one-directional: the panel never reaches
+ * into conversation state, it just mirrors whatever card rendered last.
+ */
+export function ChartCard(props: ToolCallViewProps): JSX.Element {
+  const { block, toolName } = props
+  const settled = 'kind' in block
+  const payload = settled && !block.isError ? readChartPayload(block.meta) : null
+
+  useEffect(() => {
+    if (payload !== null) publishLatestChart(payload)
+  }, [payload])
+
+  if (!settled) {
+    return <div style={SHELL}>{toolName} …</div>
+  }
+  if (block.isError) {
+    return <Fallback text={contentText(block.content) || `${toolName} failed`} error />
+  }
+  if (payload === null) {
+    return <Fallback text={contentText(block.content)} error={false} />
+  }
+  return <ChartBody payload={payload} />
 }

@@ -16,7 +16,7 @@ against the real candle window. All footage is a live session, no mockups.
 
 ## Design
 
-Six packages, one direction of dependency:
+Eight packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
@@ -27,6 +27,8 @@ Six packages, one direction of dependency:
         ▲  implements
         │
 @dsh-trading/provider-csv     reference provider: local CSV files
+@dsh-trading/provider-futu    live provider: HK / US / A-share candles from a
+                              local Futu OpenD
 
 @dsh-trading/risk-guard       independent: refuses execution-shaped tool names
                               from any plugin, at dsh's tools/pre-execute gate
@@ -38,13 +40,43 @@ Six packages, one direction of dependency:
                               Verdicts may honestly be NOT PROVEN.
 
 @dsh-trading/client-chart     web-only: candlestick cards for market_snapshot /
-                              get_ohlcv results in dsh web (no host capability)
+                              get_ohlcv results, plus the persistent chart
+                              column and the loopback channel that feeds it
+        │  fills the chart seat of
+        ▼
+@dsh-trading/client-frame     web-only: the shell frame. Replaces dsh's stock
+                              three-column layout row with a chart-first one —
+                              sidebar | chart | conversation | details,
+                              70/30 by default with the sidebar railed — and
+                              declares the `trading.chart` seat
 ```
 
 - **`market-data`** defines the seam and nothing else (its only peer is cordis). Every consumer talks to `ctx.marketData`; every data source hides behind `MarketDataProvider`.
 - **`provider-csv`** is the *bring-your-own-data* template: ~100 lines, local `<root>/<symbol>/<timeframe>.csv` files. Copy it to put ClickHouse, a broker API, or CCXT behind the same interface — tools upstream never change.
+- **`provider-futu`** is that template filled in against a real broker gateway. It reads `Qot_GetKL` rather than `Qot_RequestHistoryKL` on purpose: GetKL rides the subscription quota and serves the most recent bars (≤1000), while RequestHistoryKL spends a scarce historical quota OpenD rations by account assets. The trade is stated in the provider's own `description` and honoured in its behaviour — `start` / `end` **filter** the fetched window, they do not seek, so a query for an older range returns honestly empty rather than quietly wrong. Needs OpenD's websocket listener enabled; note that OpenD is an account-bound personal gateway, which is a licensing fact, not a configuration one.
+
+  `futu-api` is a **peer** dependency, deliberately unpinned. The SDK's version is coupled to the OpenD *you* have installed, not to this package, and Futu states outright that its package versions follow its own scheme rather than semver — so no range expresses "compatible" and the two must be aligned by hand. Install the `futu-api` matching your OpenD (`10.9.x` SDK for a `10.9.x` OpenD). The provider checks this itself at connect, via `GetGlobalState`, and logs a warning naming both versions if the protocol lines differ — a skew otherwise surfaces as a rejected handshake or an empty decode, with nothing to point at.
 - **`tool-market`** registers read-only analysis tools on `ctx.tools`. `market_snapshot` returns a whole multi-timeframe indicator regime in one call (RSI, slow stochastic, ADX/DI, MACD, MFI, ATR, SMA/EMA posture, Bollinger) with coarse state labels; `get_ohlcv` serves raw bars when structure matters. The indicator math is pure and deterministic — textbook definitions with Wilder smoothing where Wilder defined it — so values reconcile against any charting platform and a session-log replay recomputes identical model-visible numbers.
-- **`bundle/trading`** wires the rows into a dsh profile via `cordis.patch.yml`. Users repoint or replace the `market-data-provider` row from their own profile patch — that row swap **is** the BYO mechanism.
+- **`client-chart`** draws the charts, and drives them from two independent ends. The model's `market_snapshot` / `annotate_chart` results render as cards through the `tool.call.toolview` seam and are lifted into the persistent column. The USER drives the same column directly: a symbol box and timeframe row talk to `ctx.marketData` over a loopback RPC channel the package's host half publishes. That second path is the point — a workbench whose only input is "hope the agent calls the right tool" stops working the moment the agent would rather chat, which is exactly what happens in practice. The channel is read-only by construction (the two verbs of `MarketDataProvider`, nothing else) and never touches the tool layer, so risk-guard's execution gate is neither weakened nor bypassed.
+
+  The panel also **publishes what it is showing** back to the host, and the host feeds that to the model two ways: a one-line context injection each turn, and a `get_chart_view` tool for the same facts on demand. This closes a loop that was conspicuously open — the panel's data path bypasses the tool layer by design, so nothing about the user's chart reached the agent on its own, and the agent would ask the user to screenshot a chart it was rendering two columns away. The injection costs nothing while the panel is idle (empty text is no contribution) and the published value is validated on arrival: it lands in a model's context, which makes it a prompt-injection surface as much as a correctness one.
+
+  The panel keeps the chart **live**: it re-reads the last few bars every few seconds and merges them by open time, so a forming bar is replaced in place and a new one is appended — append blindly and a live chart grows a duplicate candle every poll. Updates go through `updateData` on the existing plot rather than a rebuild, so the canvas never flickers. A poll rather than a push, deliberately: the host channel is unary, and a chart seconds old is worth far less engineering than a streaming transport. When the tape stops moving the panel notices it is learning nothing and backs off to once a minute, springing back the moment a bar moves — which is cheaper and more honest than shipping a market calendar. Hidden tabs and a closed column poll not at all.
+- **`client-frame`** is the layout half of the same row-swap idea. dsh's shell is one plugin row (`ui-layout`) that occupies the built-in `root` slot and declares the `sidebar` / `conversation` / `details` / `shell.overlay` seats inside it. Slot core permits exactly **one declarer per seat**, so a frame cannot sit beside the stock one — the bundle disables that row and inserts ours, which re-declares those four seats *under the same names*. `ui-sidebar` and `ui-conversation` register by name, so dsh's real sidebar and its real conversation surface mount into a third-party frame unchanged; we only decide the column order. On top of them it adds a fifth seat, `trading.chart`, for the persistent chart column.
+
+  Its defaults differ from the stock shell on purpose. The chart takes **70% of the free width** and the conversation 30 — stored as a *ratio*, not a pixel width, because "the chart takes 70%" has to survive a window resize to mean anything. The conversation floor drops from dsh's 640px to 420, since here it is a side column rather than the whole app; holding 640 would make the split impossible on a laptop. The sidebar starts collapsed to its rail: a permanent session-history column is a poor trade against chart width, so the frame contributes a session switcher to `conversation.session.header.utilities` instead — the route to your sessions lives in the conversation's own top-right, next to the thing it switches. No fork, no patched core — the same mechanism as swapping `market-data-provider`.
+
+  **Opt-in, not bundled.** This row is deliberately absent from `@dsh-trading/bundle`: replacing the whole shell is far too opinionated to impose on everyone who installs the bundle. Add it from your own profile patch when you want it:
+
+  ```yaml
+  - id: ui-layout
+    disabled: true
+
+  - insert:
+      - id: trading-frame
+        name: '@dsh-trading/client-frame'
+  ```
+- **`bundle/trading`** wires the rows into a dsh profile via `cordis.patch.yml`. Users repoint or replace the `market-data-provider` row from their own profile patch — that row swap **is** the BYO mechanism. The shell frame is not among those rows — see `client-frame` above for the two lines that enable it.
 
 ## Why this and not another finance plugin?
 
