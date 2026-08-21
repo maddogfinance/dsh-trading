@@ -53,7 +53,7 @@ export interface MarketClient {
     to?: string | undefined
     close?: number | undefined
     live: boolean
-    origin: 'user' | 'agent'
+    origin: 'user' | 'agent' | 'followed'
     marks?: number | undefined
     marksDropped?: number | undefined
     marksTimeframe?: string | undefined

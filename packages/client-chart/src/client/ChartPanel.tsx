@@ -21,6 +21,7 @@ import type { CSSProperties, FormEvent } from 'react'
 import type { ChartOwnerProps } from '@dsh-trading/client-frame/client'
 import { ChartBody } from './ChartCard.js'
 import { getLatestChart, subscribeLatestChart } from './latest.js'
+import { decideFollow } from './follow.js'
 import { mergeMarks, mergeTail, readMarks, withCandles } from './market-client.js'
 import type { ChartMarks, MarketClient } from './market-client.js'
 import type { ChartPayload } from './payload.js'
@@ -64,6 +65,12 @@ const QUIET_LIMIT = 8
  * would fall silent.
  */
 const VIEW_HEARTBEAT_MS = 10_000
+
+/** Settle time before following the conversation, so a burst of calls costs one fetch. */
+const FOLLOW_SETTLE_MS = 400
+
+/** Consecutive failed refreshes before the badge stops claiming the chart is live. */
+const STALL_AFTER = 3
 
 const PANEL_SHELL: CSSProperties = { padding: '10px 14px 14px', fontSize: 12, lineHeight: 1.5 }
 
@@ -132,8 +139,15 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   const [tick, setTick] = useState<string | null>(null)
   const [marks, setMarks] = useState<ChartMarks | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  const [pinned, setPinned] = useState(false)
+  const [stalled, setStalled] = useState(false)
+  const followTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inflight = useRef<AbortController | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const quiet = useRef(0)
+  const fails = useRef(0)
+  const failedFollow = useRef<string | null>(null)
+  const ownOrigin = useRef<'user' | 'followed'>('user')
 
   // Adopt whatever the agent last DREW, separately from what it last fetched.
   // Keyed on content, not identity: `latest` republishes the same payload
@@ -165,12 +179,13 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   // about a different chart, mergeMarks hands the payload straight back.
   const payload = merged?.payload ?? own ?? fromAgent
 
-  const load = useCallback(async (symbol: string, tf: string) => {
+  const load = useCallback(async (symbol: string, tf: string, trigger: 'user' | 'follow' = 'user') => {
     inflight.current?.abort()
     const controller = new AbortController()
     inflight.current = controller
     setBusy(true)
-    setError(null)
+    if (trigger === 'user') setError(null)
+    failedFollow.current = null
     // A deliberate lookup is a fresh start for the live loop: the quiet streak
     // belongs to the series that earned it, so carrying it across a symbol or
     // timeframe change would leave a moving instrument stuck at the idle
@@ -178,13 +193,64 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     quiet.current = 0
     try {
       const next = await market.getPayload(symbol, tf, controller.signal)
-      if (!controller.signal.aborted) setOwn(next)
+      if (!controller.signal.aborted) {
+        setOwn(next)
+        ownOrigin.current = trigger === 'user' ? 'user' : 'followed'
+        // Always clear a stale error on success, whoever asked. `error`
+        // outranks the chart in the render ladder, so leaving one set would
+        // hide the chart a followed load just put on screen — with no control
+        // anywhere to dismiss it.
+        setError(null)
+        fails.current = 0
+        setStalled(false)
+      }
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
+      // A followed load leaves whatever is on screen alone: `error` outranks
+      // the chart in the render ladder, so a transient failure would replace a
+      // good chart with red text nobody asked for.
+      if (!controller.signal.aborted) {
+        if (trigger === 'user') setError(cause instanceof Error ? cause.message : String(cause))
+        // Remember a target the conversation asked for and the provider
+        // refused. The follow effect re-runs on every `own` identity change —
+        // and the live tail mints one per price tick — so without this the
+        // panel refetches the same failing symbol for as long as the tape
+        // moves, silently, forever.
+        else failedFollow.current = `${symbol}|${tf}`
+      }
     } finally {
       if (!controller.signal.aborted) setBusy(false)
     }
   }, [market])
+
+  // Follow the conversation. The agent's payload is a frozen <=200-bar
+  // snapshot and the live loop only runs on a series the panel fetched itself,
+  // so adopting it verbatim gives a chart that never moves — the reported
+  // symptom. Instead the panel loads that instrument and interval as ITS OWN
+  // series: live, full depth, and the marks then match by construction.
+  //
+  // Debounced because an analysis can call annotate_chart dozens of times in
+  // one turn; only the settled target is worth a fetch.
+  useEffect(() => {
+    const decision = decideFollow(
+      fromAgent === null
+        ? null
+        : { symbol: fromAgent.symbol, timeframe: fromAgent.timeframes[0]?.timeframe },
+      {
+        width,
+        pinned,
+        own: own === null ? null : { symbol: own.symbol, timeframe: own.timeframes[0]?.timeframe },
+      },
+    )
+    if (decision.action !== 'load') return
+    if (failedFollow.current === `${decision.symbol}|${decision.timeframe}`) return
+
+    clearTimeout(followTimer.current)
+    followTimer.current = setTimeout(() => {
+      setTimeframe(decision.timeframe)
+      void load(decision.symbol, decision.timeframe, 'follow')
+    }, FOLLOW_SETTLE_MS)
+    return () => clearTimeout(followTimer.current)
+  }, [fromAgent, own, pinned, width, load])
 
   // One symbols probe on mount, purely to tell the user what this provider
   // actually carries — a wrong-format symbol is the likeliest first mistake.
@@ -201,6 +267,21 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   }, [market])
 
   useEffect(() => () => inflight.current?.abort(), [])
+
+  // Mirror the instrument on screen into the input, so the box is never empty
+  // under a chart and a submit means "reload what I am looking at". Skipped
+  // while the field has focus — the user's half-typed symbol outranks this.
+  const shownRef = useRef<string | null>(null)
+  useEffect(() => {
+    const shown = payload?.symbol?.trim() ?? ''
+    if (shown === '' || shown === shownRef.current) return
+    // Record only what was actually mirrored. Marking a symbol as done while
+    // the field had focus left the box stuck on the previous instrument for
+    // good, because the guard above then short-circuits every later run.
+    if (document.activeElement === inputRef.current) return
+    shownRef.current = shown
+    setDraft(shown)
+  }, [payload])
 
   // Publish what is on screen. The panel's data path deliberately bypasses the
   // tool layer, which means nothing about this chart reaches the model on its
@@ -221,8 +302,11 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
         from: first?.time,
         to: last?.time,
         close: last?.close,
-        live,
-        origin: own !== null ? 'user' : 'agent',
+        // Effective liveness, not the toggle: a stalled column is not
+        // refreshing, and saying otherwise makes the model vouch for a frozen
+        // chart's freshness.
+        live: live && !stalled,
+        origin: own === null ? 'agent' : ownOrigin.current === 'user' ? 'user' : 'followed',
         // Whether the agent's drawings actually landed is the one thing it
         // cannot infer: annotate_chart returning successfully says nothing
         // about what this column decided to render.
@@ -265,6 +349,13 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
       try {
         const tail = await market.getTail(symbol, tf, TAIL_BARS, controller.signal)
         if (stopped) return
+        // A refresh that succeeded is the end of a stall, whether or not the
+        // bars moved: on a closed tape every poll returns the same series, and
+        // clearing only on movement latched the warning on for the session.
+        // Also keeps setStalled out of the updater below — React invokes those
+        // during render, twice under StrictMode.
+        fails.current = 0
+        setStalled(false)
         setOwn(current => {
           if (current === null) return current
           const series = current.timeframes[0]?.candles ?? []
@@ -278,9 +369,13 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
           return withCandles(current, nextSeries)
         })
       } catch {
-        // A transient provider hiccup must not kill the live loop or replace a
-        // good chart with an error; the next tick simply tries again.
+        // A transient hiccup must not kill the loop or replace a good chart
+        // with an error — but a SUSTAINED one must not keep claiming "Live"
+        // over a frozen chart either. That combination is what makes a dead
+        // transport look like a broken feature.
         quiet.current += 1
+        fails.current += 1
+        if (fails.current >= STALL_AFTER) setStalled(true)
       }
       const quietly = quiet.current >= QUIET_LIMIT
       const unwatched = document.visibilityState !== 'visible'
@@ -301,15 +396,33 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
 
   if (width === 0) return null
 
+  // What the toolbar describes is what is ON SCREEN — which is not always what
+  // the user typed. A chart the agent produced arrives with `own` null and the
+  // input still empty, and reading the controls off `draft` alone left the
+  // timeframe buttons inert (no symbol to reload) while highlighting a period
+  // the chart was not even drawn on.
+  const shownSymbol = (payload?.symbol ?? '').trim()
+  const shownTimeframe = payload?.timeframes[0]?.timeframe
+  // A period the user just clicked wins until its data lands. Reading the
+  // highlight off the payload alone meant a click gave no feedback while the
+  // fetch was in flight, and was silently discarded if the fetch failed — the
+  // next submit would then use a period the toolbar was no longer showing.
+  const activeTimeframe = busy || error !== null ? timeframe : shownTimeframe ?? timeframe
+
   const submit = (e: FormEvent): void => {
     e.preventDefault()
     const symbol = draft.trim()
-    if (symbol !== '') void load(symbol, timeframe)
+    if (symbol === '') return
+    setPinned(true)
+    void load(symbol, activeTimeframe)
   }
 
   const pickTimeframe = (tf: string): void => {
+    setPinned(true)
     setTimeframe(tf)
-    const symbol = (own?.symbol ?? draft).trim()
+    // Prefer the symbol on screen over the draft: switching the period of a
+    // chart the agent put up is the commonest reason to touch these buttons.
+    const symbol = (draft.trim() !== '' ? draft : shownSymbol).trim()
     if (symbol !== '') void load(symbol, tf)
   }
 
@@ -347,6 +460,12 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
               style={TF_BUTTON(false)}
               title={`The agent drew on ${active.rawSymbol} ${active.timeframe}. Load that chart here to see the marks.`}
               onClick={() => {
+                // Taking the agent's marked-up chart IS the user taking the
+                // wheel — same as submitting a symbol or picking a period.
+                // Left unpinned, the follow effect drags the column back to
+                // whatever the conversation last charted 400ms later, so the
+                // button could never actually land anywhere.
+                setPinned(true)
                 setDraft(active.rawSymbol)
                 setTimeframe(active.timeframe)
                 void load(active.rawSymbol, active.timeframe)
@@ -381,6 +500,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <form style={BAR} onSubmit={submit}>
         <input
+          ref={inputRef}
           style={INPUT}
           value={draft}
           onChange={e => setDraft(e.target.value)}
@@ -391,19 +511,35 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
           autoCorrect="off"
         />
         {TIMEFRAMES.map(tf => (
-          <button key={tf} type="button" style={TF_BUTTON(tf === timeframe)} onClick={() => pickTimeframe(tf)}>
+          <button key={tf} type="button" style={TF_BUTTON(tf === activeTimeframe)} onClick={() => pickTimeframe(tf)}>
             {tf}
           </button>
         ))}
+        {pinned
+          ? (
+            <button
+              type="button"
+              style={TF_BUTTON(false)}
+              title="This chart is pinned — the column stopped following the conversation. Click to follow again."
+              onClick={() => setPinned(false)}
+            >
+              📌 Pinned
+            </button>
+          )
+          : null}
         {marksPill}
         <button
           type="button"
           style={{ ...TF_BUTTON(live), marginLeft: 'auto' }}
           onClick={() => setLive(v => !v)}
           aria-pressed={live}
-          title={live ? 'Live updates on — click to pause' : 'Live updates paused'}
+          title={
+            !live ? 'Live updates paused'
+              : stalled ? 'Refreshes are failing — the chart is not moving. Reload the page if this persists.'
+                : 'Live updates on — click to pause'
+          }
         >
-          {live ? `● Live${tick !== null ? ` ${tick}` : ''}` : '❙❙ Paused'}
+          {!live ? '❙❙ Paused' : stalled ? '⚠ Stalled' : `● Live${tick !== null ? ` ${tick}` : ''}`}
         </button>
       </form>
 
@@ -418,7 +554,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
               </div>
             )
             : payload !== null
-              ? <ChartBody payload={payload} shell={PANEL_SHELL} fill />
+              ? <ChartBody payload={payload} shell={PANEL_SHELL} fill prose={false} />
               : (
                 <div style={NOTE}>
                   <p>Type a symbol above, or ask the agent for one.</p>
