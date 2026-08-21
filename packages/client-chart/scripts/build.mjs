@@ -31,6 +31,8 @@ const EXTERNALS = [
   '@deepseek-ai/dsh-client-runtime/client',
   '@deepseek-ai/dsh-client-ui-tool',
   '@deepseek-ai/dsh-client-ui-tool/client',
+  '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/dsh-client-connection/client',
 ]
 
 execFileSync(process.execPath, [
