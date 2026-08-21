@@ -170,10 +170,20 @@ function ensureRegistered(): void {
         styles: { style: typeof ext['dashed'] === 'boolean' && ext['dashed'] ? 'dashed' : 'solid', color },
         ignoreEvent: true,
       }]
-      if (typeof ext['label'] === 'string' && ext['label'] !== '') {
+      // `lane` comes from the layout pass, which is the only place that can
+      // see every line at once: a label drawn here knows its own price and
+      // nothing else, so left to itself it lands at the same x as every
+      // neighbour and they pile up illegibly.
+      const lane = typeof ext['lane'] === 'number' ? ext['lane'] : 0
+      // A lane only exists if the pane is wide enough to hold it. The layout
+      // pass runs before any geometry is known, so a narrow column could be
+      // handed lane 2 and print its caption off the right edge — placed as far
+      // as the pass knows, invisible as far as the reader is concerned.
+      const usableLanes = Math.max(1, Math.floor((bounding.width - 6) / LABEL_LANE_WIDTH))
+      if (lane >= 0 && lane < usableLanes && typeof ext['label'] === 'string' && ext['label'] !== '') {
         figures.push({
           type: 'text',
-          attrs: { x: 6, y: y - 4, text: ext['label'], baseline: 'bottom' },
+          attrs: { x: 6 + lane * LABEL_LANE_WIDTH, y: y - 4, text: ext['label'], baseline: 'bottom' },
           styles: { color, size: 10, backgroundColor: 'transparent' },
           ignoreEvent: true,
         })
@@ -325,12 +335,71 @@ const CHIP_DEFS: ChipDef[] = [
   { id: 'ma', label: ind => ({ text: 'MA posture', state: get(ind['movingAverages'], 'closeVs') }) },
 ]
 
-function drawPrimitive(chart: Pick<Chart, 'createOverlay'>, prim: DrawPrimitive): void {
+/** Horizontal step between label lanes, in px. */
+const LABEL_LANE_WIDTH = 150
+
+/** Lanes available before a label is dropped rather than stacked. */
+const LABEL_LANES = 3
+
+/**
+ * Fraction of the visible price range under which two labels would collide.
+ * ~2.5% of the plot height at the label's 10px type size plus breathing room.
+ */
+const LABEL_MIN_GAP = 0.025
+
+/**
+ * Assign each horizontal line a label lane, or -1 to draw the line unlabelled.
+ *
+ * Ten levels inside a 5% band cannot all be captioned legibly next to their
+ * lines — something has to give, and a pile of overlapping text gives the
+ * reader nothing while claiming to give them everything. Lines that sit close
+ * together step sideways into free lanes; past the last lane the caption is
+ * dropped and the line stays. Nothing is lost: the full table, with prices and
+ * provenance, is in the chat beside this chart.
+ *
+ * Placement runs in price space against the window's own range, because the
+ * exact pixel scale is not known until the chart lays itself out — an
+ * approximation that is deterministic and far better than none.
+ *
+ * @param prices - line prices, in draw order.
+ * @param low - lowest price in the drawn window.
+ * @param high - highest price in the drawn window.
+ * @returns one lane per input price, aligned by index; -1 means no label.
+ */
+export function assignLabelLanes(prices: readonly number[], low: number, high: number): number[] {
+  const span = high - low
+  const lanes = new Array<number>(prices.length).fill(0)
+  if (!Number.isFinite(span) || span <= 0) return lanes
+
+  // Sort by price descending so lanes fill the way the eye reads the axis.
+  const order = prices.map((price, index) => ({ price, index }))
+    .sort((a, b) => b.price - a.price)
+  // Last y-position placed in each lane, as a 0..1 fraction of the range.
+  // NEGATIVE infinity: an empty lane must accept the first label, and
+  // `y - (+Infinity)` is -Infinity, which clears no gap at all.
+  const occupied = new Array<number>(LABEL_LANES).fill(Number.NEGATIVE_INFINITY)
+
+  for (const { price, index } of order) {
+    const y = (high - price) / span
+    let placed = -1
+    for (let lane = 0; lane < LABEL_LANES; lane += 1) {
+      if (y - occupied[lane]! >= LABEL_MIN_GAP) {
+        occupied[lane] = y
+        placed = lane
+        break
+      }
+    }
+    lanes[index] = placed
+  }
+  return lanes
+}
+
+function drawPrimitive(chart: Pick<Chart, 'createOverlay'>, prim: DrawPrimitive, lane = 0): void {
   if (prim.kind === 'hline') {
     chart.createOverlay({
       name: 'tm_hline', lock: true,
       points: [{ value: prim.price }],
-      extendData: { color: prim.color, dashed: prim.dashed ?? false, label: prim.label ?? '' },
+      extendData: { color: prim.color, dashed: prim.dashed ?? false, label: prim.label ?? '', lane },
     })
   } else if (prim.kind === 'region') {
     chart.createOverlay({
@@ -395,18 +464,41 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
     }
     const close = data.candles[data.candles.length - 1]!.close
     const ctx: AnnotationRendererContext = { contractVersion: 1, timeframe: data.timeframe, close, palette }
+    // Collect every primitive before drawing any: label placement is the one
+    // decision that cannot be made one line at a time.
+    const primitives: DrawPrimitive[] = []
     for (const annotation of data.annotations ?? []) {
       const renderer = annotationRenderers.get(annotation.type)
       if (renderer === undefined) continue
       try {
-        for (const prim of renderer(annotation, ctx)) drawPrimitive(chart, prim)
+        primitives.push(...renderer(annotation, ctx))
       } catch (error) {
         console.warn(`[client-chart] renderer for '${annotation.type}' failed`, error)
       }
     }
     for (const s of scenarios) {
-      if (s.triggerPrice !== undefined) drawPrimitive(chart, { kind: 'hline', price: s.triggerPrice, dashed: true, color: palette.target, label: `trigger (${s.direction})` })
-      if (s.invalidationPrice !== undefined) drawPrimitive(chart, { kind: 'hline', price: s.invalidationPrice, dashed: true, color: palette.invalidation, label: `invalidation (${s.direction})` })
+      if (s.triggerPrice !== undefined) primitives.push({ kind: 'hline', price: s.triggerPrice, dashed: true, color: palette.target, label: `trigger (${s.direction})` })
+      if (s.invalidationPrice !== undefined) primitives.push({ kind: 'hline', price: s.invalidationPrice, dashed: true, color: palette.invalidation, label: `invalidation (${s.direction})` })
+    }
+    let lowest = Infinity
+    let highest = -Infinity
+    for (const c of data.candles) {
+      if (c.low < lowest) lowest = c.low
+      if (c.high > highest) highest = c.high
+    }
+    const hlines = primitives.filter((prim): prim is Extract<DrawPrimitive, { kind: 'hline' }> => prim.kind === 'hline')
+    // Fold the lines' own prices into the range. A target above every candle
+    // sits outside the candle range, and measuring collisions against a range
+    // that excludes it puts it at a fraction beyond 0..1 — comparable, but not
+    // to the same scale the chart will use once it makes room for the line.
+    for (const h of hlines) {
+      if (h.price < lowest) lowest = h.price
+      if (h.price > highest) highest = h.price
+    }
+    const lanes = assignLabelLanes(hlines.map(h => h.price), lowest, highest)
+    let hlineSeen = 0
+    for (const prim of primitives) {
+      drawPrimitive(chart, prim, prim.kind === 'hline' ? lanes[hlineSeen++]! : 0)
     }
     const observer = new ResizeObserver(() => chart.resize())
     observer.observe(container)
@@ -506,7 +598,7 @@ function annotationRow(a: ChartAnnotation, close: number, p: Palette): { key: st
  * @param shell - container style, so the panel can drop the card's border and
  *   margins and sit flush in its column.
  */
-export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, fill = false }: {
+export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, fill = false, prose = true }: {
   payload: ChartPayload
   chartHeight?: number
   shell?: CSSProperties
@@ -517,6 +609,18 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
    * empty is wasting the width it was given.
    */
   fill?: boolean
+  /**
+   * Render the reading as well as the chart: the annotation table (price,
+   * distance, provenance) and the scenario cards.
+   *
+   * The chat bubble wants them — that is where an analysis is read, and the
+   * `sources` column carries the provenance this package refuses to draw a
+   * level without. The chart column does not: those blocks are prose that
+   * happens to sit under a canvas, and in a persistent column they crowd out
+   * the thing the column exists for. Each line still carries its own label on
+   * the plot, and the full reading is a glance to the right.
+   */
+  prose?: boolean
 }): JSX.Element {
   const dark = useDark()
   const [activeTf, setActiveTf] = useState(0)
@@ -629,7 +733,7 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
                 >{chip.text}</span>)}
           </div>
         : null}
-      {rows.length > 0
+      {prose && rows.length > 0
         ? <table style={{ width: '100%', marginTop: 10, borderCollapse: 'collapse', fontSize: 11.5 }}>
             <tbody>
               {rows.map(row => (
@@ -646,7 +750,7 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
             </tbody>
           </table>
         : null}
-      {scenarios.length > 0
+      {prose && scenarios.length > 0
         ? <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
             {scenarios.map((s, i) => (
               <div
@@ -676,7 +780,8 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
           </div>
         : null}
       <div style={{ color: palette.faint, marginTop: 6, fontSize: 11 }}>
-        {first.time} … {last.time} · chips toggle indicator panes drawn from the exact per-bar series the model read · scenarios are research hypotheses, not recommendations
+        {first.time} … {last.time} · chips toggle indicator panes drawn from the exact per-bar series the model read
+        {prose ? ' · scenarios are research hypotheses, not recommendations' : ''}
       </div>
       </div>
     </div>
