@@ -112,8 +112,11 @@ export interface ChartView {
   close?: number | undefined
   /** Whether the panel is refreshing live. */
   live: boolean
-  /** Where the payload came from: the user's own lookup, or a tool result. */
-  origin: 'user' | 'agent'
+  /**
+   * Who chose this chart: the user typed it, the column followed the
+   * conversation to it, or it is a tool result rendered verbatim.
+   */
+  origin: 'user' | 'agent' | 'followed'
   /** Agent marks currently drawn on this chart. */
   marks?: number | undefined
   /** Marks the chart refused because they fell outside its window. */
@@ -140,7 +143,7 @@ export function readChartView(payload: unknown): ChartView | string {
   const iso = (v: unknown): string | undefined =>
     typeof v === 'string' && v.length <= 32 && !Number.isNaN(Date.parse(v)) ? v : undefined
   const close = typeof b['close'] === 'number' && Number.isFinite(b['close']) ? b['close'] : undefined
-  const origin = b['origin'] === 'agent' ? 'agent' : 'user'
+  const origin = b['origin'] === 'agent' ? 'agent' : b['origin'] === 'followed' ? 'followed' : 'user'
   // Counts and a known timeframe only. This boundary stays scalars-only on
   // purpose: the marks' labels and sources are model-authored text the model
   // already wrote, and echoing them back through a prompt adds nothing but a
@@ -169,7 +172,13 @@ export function describeChartView(view: ChartView | undefined): string {
   if (view === undefined) return ''
   const span = view.from !== undefined && view.to !== undefined ? `, ${view.from} to ${view.to}` : ''
   const price = view.close !== undefined ? `, last ${view.close}` : ''
-  const who = view.origin === 'user' ? 'the user opened it' : 'from a tool result'
+  const who = view.origin === 'user'
+    ? 'the user opened it'
+    : view.origin === 'followed'
+      // Say plainly that the column chose this, or the model will assert the
+      // user's intent about an instrument they never asked for.
+      ? 'the column followed your analysis here — the user did not pick this symbol'
+      : 'from a tool result'
   // Whether the agent's own drawings actually landed is the one thing it
   // cannot infer: annotate_chart returning successfully says nothing about
   // what the user's column decided to render.

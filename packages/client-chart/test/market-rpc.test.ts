@@ -206,6 +206,34 @@ describe('describeChartView', () => {
   })
 })
 
+describe('who chose the chart', () => {
+  const BASE = { symbol: 'US.MU', timeframe: '1d', bars: 500, live: true }
+
+  it('keeps the three provenances apart', () => {
+    for (const origin of ['user', 'agent', 'followed'] as const) {
+      expect((readChartView({ ...BASE, origin }) as { origin: string }).origin).toBe(origin)
+    }
+  })
+
+  it('still coerces anything unknown to the user', () => {
+    expect((readChartView({ ...BASE, origin: 'hacker' }) as { origin: string }).origin).toBe('user')
+  })
+
+  it('tells the model plainly when the column chose the symbol', () => {
+    // Following sets `own` from the conversation, so reporting it as "the user
+    // opened it" would have the model assert an intent nobody expressed.
+    const line = describeChartView({ ...BASE, origin: 'followed' })
+    expect(line).toMatch(/followed your analysis here/)
+    expect(line).not.toMatch(/the user opened it/)
+  })
+
+  it('does not call a stalled column live', () => {
+    // The panel publishes effective liveness, so a frozen chart never gets
+    // vouched for as fresh.
+    expect(describeChartView({ ...BASE, origin: 'user', live: false })).toMatch(/paused/)
+  })
+})
+
 describe('marks reported through the view', () => {
   const VIEW = { symbol: 'US.MU', timeframe: '1d', bars: 1000, live: true, origin: 'user' }
 
