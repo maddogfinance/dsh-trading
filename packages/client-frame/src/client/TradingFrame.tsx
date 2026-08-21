@@ -131,21 +131,27 @@ export function TradingFrame({ useStore, useSessions, actions, renderSlot }: Tra
     lastSession.current = detailsSession
   }, [actions, detailsSession])
 
+  // Track the frame's width straight off the observer entry.
+  //
+  // NOT through requestAnimationFrame: rAF does not run at all while the
+  // document reports hidden, and embedding surfaces (an in-app browser pane, a
+  // tab restored in the background) report hidden while the user is looking
+  // right at them. Deferring the solve to rAF leaves the whole layout frozen
+  // at whatever `window.innerWidth` happened to be at mount — zero, in a pane
+  // that had not been sized yet — so the chart column never opens and no
+  // resize can rescue it. ResizeObserver already delivers at most once per
+  // layout, and React batches the state update, so the throttle bought
+  // nothing that was worth this.
   useEffect(() => {
     const el = frameRef.current
     if (el === null) return
-    let raf: number | null = null
-    const observer = new ResizeObserver(() => {
-      raf ??= requestAnimationFrame(() => {
-        raf = null
-        const width = el.getBoundingClientRect().width
-        if (width > 0) setViewport(width)
-      })
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width ?? el.getBoundingClientRect().width
+      if (width > 0) setViewport(prev => prev === width ? prev : width)
     })
     observer.observe(el)
     return () => {
       observer.disconnect()
-      if (raf !== null) cancelAnimationFrame(raf)
     }
   }, [])
 
