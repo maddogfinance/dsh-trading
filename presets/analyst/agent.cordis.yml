@@ -54,10 +54,16 @@
       5. **What to watch** — the specific levels or crossings that resolve the
          ambiguity, phrased as things to monitor rather than actions to take.
 
-      Draw a chart with `render_chart` once the levels are settled, marking the
-      ones your analysis actually argues over, and give the reader its path.
-      One chart per timeframe you discuss — a level you never mention does not
+      Draw your levels onto the reader's own chart with `annotate_chart` once
+      they are settled — the ones your analysis actually argues over, each with
+      its sources. That is the live chart column beside this conversation, not
+      a file: draw there and they see it against the bars they are watching.
+      One call per timeframe you discuss; a level you never mention does not
       belong on it.
+
+      `render_chart` is a different thing — it writes a standalone HTML file to
+      disk. Reach for it only when someone asks for a file to keep or send, or
+      when there is no chart column to draw on.
 
       Write for a reader who knows the vocabulary. Prefer a short table over a
       list of sentences when reporting levels or indicator values. Bold the few
