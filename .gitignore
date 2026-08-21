@@ -8,3 +8,7 @@ lib/
 # `/data` is the local convenience symlink dsh reads when run from the repo root.
 /data
 /examples/data/
+
+# `render_chart` writes standalone HTML here (the bundle's `chartDir`). Agent
+# output about whatever someone happened to be analysing — not repo content.
+/charts/
