@@ -72,14 +72,20 @@ describe('mergeTail', () => {
   })
 })
 
+const ANNOTATIONS = [{ type: 'level', price: 101, label: 'neckline', role: 'other', sources: ['prior swing'] }]
+const SCENARIOS = [{
+  direction: 'bull' as const, stance: 'base' as const,
+  thesis: 't', trigger: 'x', invalidation: 'y',
+}]
+
 describe('withCandles', () => {
   const payload: ChartPayload = {
     kind: 'chart',
     version: 1,
     provider: 'futu',
     symbol: 'US.MU',
-    timeframes: [{ timeframe: '1d', candles: SERIES, indicators: null, annotations: [] }],
-    scenarios: [],
+    timeframes: [{ timeframe: '1d', candles: SERIES, indicators: null, annotations: ANNOTATIONS }],
+    scenarios: SCENARIOS,
   }
 
   it('returns the same payload when the series did not move', () => {
@@ -94,5 +100,10 @@ describe('withCandles', () => {
     expect(updated.provider).toBe('futu')
     expect(updated.timeframes[0]?.timeframe).toBe('1d')
     expect(updated.timeframes[0]?.candles).toHaveLength(4)
+    // The property the whole marks feature rides on: a tail tick swaps candles
+    // and NOTHING else. Spelling `withCandles` as an explicit field list would
+    // silently strip merged annotations once per second.
+    expect(updated.timeframes[0]?.annotations).toBe(ANNOTATIONS)
+    expect(updated.scenarios).toBe(SCENARIOS)
   })
 })

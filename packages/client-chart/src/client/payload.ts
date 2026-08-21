@@ -134,3 +134,27 @@ export function contentText(content: unknown, depth = 0): string {
   }
   return parts.join('\n')
 }
+
+/**
+ * Content identity of a chart's marks — what "the drawing changed" means.
+ *
+ * The card keys its overlay-drawing effect on this. Keying on annotation TYPES
+ * instead (what it used to do) collides on the commonest edit there is:
+ * replacing three levels with three different levels leaves the type list
+ * byte-identical, so the canvas keeps the old prices while the table below it
+ * prints the new ones. Invisible in a chat bubble that mounts fresh each time;
+ * permanent in a persistent column that receives annotate_chart repeatedly.
+ *
+ * Order-sensitive on purpose: a reorder counts as a change and costs one extra
+ * rebuild, which is the cheap side of this trade.
+ *
+ * @param annotations - the timeframe's annotations.
+ * @param scenarios - the payload's scenarios.
+ * @returns a string that differs whenever anything drawable differs.
+ */
+export function annotationDigest(
+  annotations: readonly ChartAnnotation[] | undefined,
+  scenarios: readonly ChartScenario[] | undefined,
+): string {
+  return JSON.stringify([annotations ?? [], scenarios ?? []])
+}
