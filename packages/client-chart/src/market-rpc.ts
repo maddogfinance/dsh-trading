@@ -114,6 +114,12 @@ export interface ChartView {
   live: boolean
   /** Where the payload came from: the user's own lookup, or a tool result. */
   origin: 'user' | 'agent'
+  /** Agent marks currently drawn on this chart. */
+  marks?: number | undefined
+  /** Marks the chart refused because they fell outside its window. */
+  marksDropped?: number | undefined
+  /** Timeframe the marks were authored on. */
+  marksTimeframe?: string | undefined
 }
 
 /**
@@ -135,10 +141,20 @@ export function readChartView(payload: unknown): ChartView | string {
     typeof v === 'string' && v.length <= 32 && !Number.isNaN(Date.parse(v)) ? v : undefined
   const close = typeof b['close'] === 'number' && Number.isFinite(b['close']) ? b['close'] : undefined
   const origin = b['origin'] === 'agent' ? 'agent' : 'user'
+  // Counts and a known timeframe only. This boundary stays scalars-only on
+  // purpose: the marks' labels and sources are model-authored text the model
+  // already wrote, and echoing them back through a prompt adds nothing but a
+  // round trip for injected content.
+  const count = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.trunc(v))) : undefined
+  const marksTimeframe = typeof b['marksTimeframe'] === 'string' && TIMEFRAMES.has(b['marksTimeframe'])
+    ? b['marksTimeframe']
+    : undefined
   return {
     symbol: symbol.trim(), timeframe, bars,
     from: iso(b['from']), to: iso(b['to']), close,
     live: b['live'] === true, origin,
+    marks: count(b['marks']), marksDropped: count(b['marksDropped']), marksTimeframe,
   }
 }
 
@@ -154,9 +170,17 @@ export function describeChartView(view: ChartView | undefined): string {
   const span = view.from !== undefined && view.to !== undefined ? `, ${view.from} to ${view.to}` : ''
   const price = view.close !== undefined ? `, last ${view.close}` : ''
   const who = view.origin === 'user' ? 'the user opened it' : 'from a tool result'
+  // Whether the agent's own drawings actually landed is the one thing it
+  // cannot infer: annotate_chart returning successfully says nothing about
+  // what the user's column decided to render.
+  const drawn = view.marks !== undefined && view.marks > 0
+    ? ` Your annotate_chart marks are drawn on it (${view.marks} from the ${view.marksTimeframe ?? view.timeframe} analysis`
+      + `${view.marksDropped !== undefined && view.marksDropped > 0
+        ? `; ${view.marksDropped} fell outside this window and are not shown` : ''}).`
+    : ''
   return (
     `The user's chart panel is showing ${view.symbol} at ${view.timeframe} `
-    + `(${view.bars} bars${span}${price}; ${view.live ? 'refreshing live' : 'paused'}; ${who}). `
+    + `(${view.bars} bars${span}${price}; ${view.live ? 'refreshing live' : 'paused'}; ${who}).${drawn} `
     + `You can see this chart — do not ask for a screenshot of it. `
     + `Call get_chart_view for the same facts on demand, or the market tools for the data behind it.`
   )

@@ -6,7 +6,8 @@
  * @module
  */
 
-import type { ChartPayload } from './payload.js'
+import { annotationDigest } from './payload.js'
+import type { ChartAnnotation, ChartPayload, ChartScenario } from './payload.js'
 
 /**
  * Mirrors the host's `MARKET_CHANNEL`; duplicated rather than imported so the
@@ -53,6 +54,9 @@ export interface MarketClient {
     close?: number | undefined
     live: boolean
     origin: 'user' | 'agent'
+    marks?: number | undefined
+    marksDropped?: number | undefined
+    marksTimeframe?: string | undefined
   }): void
 }
 
@@ -101,6 +105,199 @@ export function withCandles(payload: ChartPayload, candles: Candle[]): ChartPayl
   const tf = payload.timeframes[0]
   if (tf === undefined || tf.candles === candles) return payload
   return { ...payload, timeframes: [{ ...tf, candles }, ...payload.timeframes.slice(1)] }
+}
+
+/* ------------------------------------------------------------------ */
+/* Agent marks: the drawings annotate_chart produced, lifted off its    */
+/* payload so they can be overlaid on the series the USER is watching.  */
+/* ------------------------------------------------------------------ */
+
+/** Marks lifted off an agent payload, normalised and content-keyed. */
+export interface ChartMarks {
+  /** `provider|SYMBOL|timeframe|digest` — content identity, not object identity. */
+  key: string
+  provider: string
+  /** Normalised for matching only: trimmed and upper-cased. */
+  symbol: string
+  /**
+   * The symbol as the producer wrote it, trimmed. Instrument codes are
+   * case-sensitive at the provider (Futu keeps the code's case and only
+   * upper-cases the market prefix), so the normalised form above is a
+   * comparison key and must never be handed back to a lookup.
+   */
+  rawSymbol: string
+  timeframe: string
+  annotations: ChartAnnotation[]
+  scenarios: ChartScenario[]
+  /** Local clock when these marks were adopted, for the pill. */
+  at: string
+}
+
+/** Outcome of trying to draw marks on a series. */
+export interface MergeMarksResult {
+  /** The payload to render — the SAME reference when nothing was drawn. */
+  payload: ChartPayload
+  /** Whether the marks are about this exact chart. */
+  applied: boolean
+  kept: number
+  dropped: number
+}
+
+/**
+ * Lift the drawings off an agent payload, or null when it carries none.
+ *
+ * `market_snapshot` and `get_ohlcv` payloads have neither annotations nor
+ * scenarios, so they can never blank existing marks — the panel's adoption
+ * effect relies on that.
+ *
+ * @param payload - the newest payload a chat card rendered.
+ * @returns normalised marks, or null when there is nothing to adopt.
+ */
+export function readMarks(payload: ChartPayload | null): ChartMarks | null {
+  if (payload === null) return null
+  const tf = payload.timeframes.find(t => (t.annotations?.length ?? 0) > 0) ?? payload.timeframes[0]
+  if (tf === undefined) return null
+  const annotations = [...tf.annotations ?? []]
+  const scenarios = [...payload.scenarios ?? []]
+  if (annotations.length === 0 && scenarios.length === 0) return null
+  const rawSymbol = payload.symbol.trim()
+  const symbol = rawSymbol.toUpperCase()
+  return {
+    key: `${payload.provider}|${symbol}|${tf.timeframe}|${annotationDigest(annotations, scenarios)}`,
+    provider: payload.provider,
+    symbol,
+    rawSymbol,
+    timeframe: tf.timeframe,
+    annotations,
+    scenarios,
+    at: new Date().toLocaleTimeString(),
+  }
+}
+
+/** Plausibility band, mirroring the producer's own validation. */
+function band(role: unknown, lo: number, hi: number): { floor: number; ceil: number } {
+  const wide = role === 'target' || role === 'invalidation'
+  return wide ? { floor: lo * 0.5, ceil: hi * 2.0 } : { floor: lo * 0.7, ceil: hi * 1.3 }
+}
+
+function inBand(price: unknown, role: unknown, lo: number, hi: number): boolean {
+  if (typeof price !== 'number' || !Number.isFinite(price)) return false
+  const { floor, ceil } = band(role, lo, hi)
+  return price >= floor && price <= ceil
+}
+
+/**
+ * Draw an agent's marks onto the user's series — but only when they are about
+ * that exact chart.
+ *
+ * The predicate is deliberately strict: same provider, same symbol
+ * (case-insensitively), same timeframe. A price level is meaningful on any
+ * timeframe in the abstract, but klinecharts scales its price axis to the
+ * VISIBLE candles, so a level lifted onto a different window can sit off-pane
+ * while its row in the table below still prints a price and a distance. Half a
+ * drawing that disagrees with its own caption is the failure this feature
+ * exists to prevent; the panel offers to switch the chart instead.
+ *
+ * Survivors are additionally range-gated against the user's own candles. The
+ * producer validated every price against ITS window; at equal timeframe the
+ * user's window is a superset, so this is defense in depth rather than a
+ * second opinion — but a mark it refuses is one that would have been drawn
+ * outside the plot.
+ *
+ * Indicators and per-bar series are never copied: they are aligned
+ * index-for-index with the agent's own (shorter) window and are read
+ * positionally, so importing them would shift indicator panes by hundreds of
+ * bars and print numbers that look real.
+ *
+ * @param payload - the user's live payload.
+ * @param marks - the agent's drawings.
+ * @returns the payload to render plus what happened, for the UI to report.
+ */
+export function mergeMarks(payload: ChartPayload, marks: ChartMarks): MergeMarksResult {
+  const tf = payload.timeframes[0]
+  const refused: MergeMarksResult = { payload, applied: false, kept: 0, dropped: 0 }
+  if (tf === undefined) return refused
+  if (payload.provider !== marks.provider) return refused
+  if (payload.symbol.trim().toUpperCase() !== marks.symbol) return refused
+  if (tf.timeframe !== marks.timeframe) return refused
+
+  const candles = tf.candles
+  if (candles.length === 0) return { payload, applied: true, kept: 0, dropped: 0 }
+  let lo = Infinity
+  let hi = -Infinity
+  for (const c of candles) {
+    if (c.low < lo) lo = c.low
+    if (c.high > hi) hi = c.high
+  }
+  const firstMs = Date.parse(candles[0]!.time)
+  const lastMs = Date.parse(candles[candles.length - 1]!.time)
+  const forwardMs = (lastMs - firstMs) * 0.1
+
+  let dropped = 0
+  const kept: ChartAnnotation[] = []
+  for (const a of marks.annotations) {
+    const record = a as unknown as Record<string, unknown>
+    const role = record['role']
+    if (a.type === 'level') {
+      if (inBand(record['price'], role, lo, hi)) kept.push(a)
+      else dropped += 1
+    } else if (a.type === 'zone') {
+      if (inBand(record['low'], role, lo, hi) && inBand(record['high'], role, lo, hi)) kept.push(a)
+      else dropped += 1
+    } else if (a.type === 'path') {
+      const points = Array.isArray(record['points']) ? record['points'] : []
+      // A path is dropped WHOLE or not at all: a truncated path is a different
+      // claim than the one the agent made.
+      const ok = points.length >= 2 && points.every(p => {
+        if (typeof p !== 'object' || p === null) return false
+        const pt = p as Record<string, unknown>
+        const t = typeof pt['time'] === 'string' ? Date.parse(pt['time']) : NaN
+        return inBand(pt['price'], role, lo, hi)
+          && !Number.isNaN(t) && t >= firstMs && t <= lastMs + forwardMs
+      })
+      if (ok) kept.push(a)
+      else dropped += 1
+    } else {
+      // The annotation array is an open envelope: an unknown type belongs to a
+      // renderer this build has never heard of, and stripping it would break
+      // that seam. Pass it through untouched.
+      kept.push(a)
+    }
+  }
+
+  const scenarios: ChartScenario[] = marks.scenarios.map(s => {
+    const rec = s as unknown as Record<string, unknown>
+    let next = s
+    for (const field of ['triggerPrice', 'invalidationPrice'] as const) {
+      const price = rec[field]
+      if (price !== undefined && !inBand(price, field === 'triggerPrice' ? 'target' : 'invalidation', lo, hi)) {
+        // Keep the prose, lose only the price it cannot justify.
+        const { [field]: _drop, ...rest } = next as Record<string, unknown>
+        next = rest as unknown as ChartScenario
+        dropped += 1
+      }
+    }
+    return next
+  })
+
+  if (kept.length === 0 && scenarios.length === 0) {
+    return { payload, applied: true, kept: 0, dropped }
+  }
+  // Scenarios draw trigger/invalidation lines of their own, so they count as
+  // marks; reporting only annotations makes a scenario-only analysis claim
+  // "0 marks" while its lines sit on the canvas.
+  const drawn = kept.length + scenarios.length
+
+  return {
+    payload: {
+      ...payload,
+      timeframes: [{ ...tf, annotations: kept }, ...payload.timeframes.slice(1)],
+      ...scenarios.length > 0 ? { scenarios } : {},
+    },
+    applied: true,
+    kept: drawn,
+    dropped,
+  }
 }
 
 /** Unwrap an RPC result, turning the error branch into a thrown Error. */

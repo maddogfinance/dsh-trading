@@ -122,6 +122,9 @@ export function apply(ctx: Context): void {
             close: { type: 'number' },
             live: { type: 'boolean' },
             origin: { type: 'string' },
+            marks: { type: 'number' },
+            marksDropped: { type: 'number' },
+            marksTimeframe: { type: 'string' },
           },
         },
         render: (_args, value) => [{
@@ -131,6 +134,10 @@ export function apply(ctx: Context): void {
               + `${value.from !== undefined ? `, ${value.from} to ${value.to}` : ''}`
               + `${value.close !== undefined ? `, last ${value.close}` : ''}`
               + `, ${value.live === true ? 'live' : 'paused'} (${value.origin})`
+              + `${value.marks !== undefined && value.marks > 0
+                ? ` — your ${value.marks} marks from the ${value.marksTimeframe ?? ''} analysis are drawn`
+                  + `${value.marksDropped !== undefined && value.marksDropped > 0 ? `, ${value.marksDropped} off-window` : ''}`
+                : ''}`
             : 'The chart panel is empty — the user has not opened a chart.',
         }],
       },
@@ -151,6 +158,9 @@ export function apply(ctx: Context): void {
           ...current.from !== undefined ? { from: current.from } : {},
           ...current.to !== undefined ? { to: current.to } : {},
           ...current.close !== undefined ? { close: current.close } : {},
+          ...current.marks !== undefined ? { marks: current.marks } : {},
+          ...current.marksDropped !== undefined ? { marksDropped: current.marksDropped } : {},
+          ...current.marksTimeframe !== undefined ? { marksTimeframe: current.marksTimeframe } : {},
         }
       },
       presentCall: args => ({ card: 'generic', title: 'Read chart panel', kind: 'read', rawInput: args }),
