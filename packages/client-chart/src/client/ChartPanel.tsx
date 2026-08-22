@@ -22,7 +22,7 @@ import type { ChartOwnerProps } from '@dsh-trading/client-frame/client'
 import { ChartBody } from './ChartCard.js'
 import { getLatestChart, subscribeLatestChart } from './latest.js'
 import { decideFollow } from './follow.js'
-import { mergeMarks, mergeTail, readMarks, withCandles } from './market-client.js'
+import { mergeMarks, mergeTail, readMarks, recallMarks, rememberMarks, withCandles } from './market-client.js'
 import type { ChartMarks, MarketClient } from './market-client.js'
 import type { ChartPayload } from './payload.js'
 
@@ -137,7 +137,10 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   const [hint, setHint] = useState<string | null>(null)
   const [live, setLive] = useState(true)
   const [tick, setTick] = useState<string | null>(null)
-  const [marks, setMarks] = useState<ChartMarks | null>(null)
+  // Seeded from this tab's memory: see rememberMarks. Without it a reload
+  // loses the drawing whenever the card that produced it has scrolled out of
+  // the conversation and no longer renders.
+  const [marks, setMarks] = useState<ChartMarks | null>(recallMarks)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [pinned, setPinned] = useState(false)
   const [stalled, setStalled] = useState(false)
@@ -158,6 +161,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     if (next === null) return
     setMarks(cur => {
       if (cur !== null && cur.key === next.key) return cur
+      rememberMarks(next)
       // A dismissal is about the marks that were on screen when it was
       // clicked, not a standing veto. Without this, adopting a different set
       // while an old key is dismissed hides the pill too — and with the pill

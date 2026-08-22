@@ -374,3 +374,49 @@ export function createMarketClient(rpc: RpcCaller): MarketClient {
     },
   }
 }
+
+/** Where a tab remembers the marks it was last showing. */
+const MARKS_KEY = 'dsh-trading:chart-marks'
+
+/**
+ * Remember the agent's marks for this tab.
+ *
+ * `latest` holds one payload and only a card that RENDERS publishes it, so
+ * after a reload the marks depend on which cards the conversation happened to
+ * have in view — an annotated chart drawn twenty messages ago is virtualised
+ * away and its drawing silently does not come back. Session storage is the
+ * right scope: per tab, and gone when the tab closes, so nothing resurfaces a
+ * day later claiming to be current.
+ *
+ * Failures are swallowed. Storage can be full or blocked by policy, and a
+ * chart that draws without its marks is a far better outcome than one that
+ * does not draw at all.
+ *
+ * @param marks - the marks to remember, or null to forget them.
+ */
+export function rememberMarks(marks: ChartMarks | null): void {
+  try {
+    if (marks === null) sessionStorage.removeItem(MARKS_KEY)
+    else sessionStorage.setItem(MARKS_KEY, JSON.stringify(marks))
+  } catch { /* storage is a convenience, never a requirement */ }
+}
+
+/**
+ * Read back the marks this tab was last showing.
+ * @returns the remembered marks, or null when there are none or they are unreadable.
+ */
+export function recallMarks(): ChartMarks | null {
+  try {
+    const raw = sessionStorage.getItem(MARKS_KEY)
+    if (raw === null) return null
+    const parsed = JSON.parse(raw) as ChartMarks
+    // Validate the shape rather than trusting storage: this feeds the merge
+    // predicate and, through it, what gets drawn on a chart.
+    if (typeof parsed?.key !== 'string' || typeof parsed?.symbol !== 'string') return null
+    if (typeof parsed.rawSymbol !== 'string' || typeof parsed.timeframe !== 'string') return null
+    if (!Array.isArray(parsed.annotations) || !Array.isArray(parsed.scenarios)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
