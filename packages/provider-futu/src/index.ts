@@ -31,7 +31,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Candle, InstrumentInfo, MarketDataProvider, OhlcvQuery } from '@dsh-trading/market-data'
-import { mergeBars, toCandles } from './candles.js'
+import { mergeKLinePush, toCandles } from './candles.js'
 import type { FutuKLine } from './candles.js'
 import { OpenDSession, seriesKeyOf } from './opend.js'
 import { resolveSymbol, resolveTimeframe, SUPPORTED_TIMEFRAMES } from './protocol.js'
@@ -80,7 +80,7 @@ class FutuProvider implements MarketDataProvider {
   readonly #symbols: string[]
   readonly #bars: number
   /** Warm series per subscribed (security, klType): seeded by GetKL, kept current by pushes. */
-  readonly #series = new Map<string, Candle[]>()
+  readonly #series = new Map<string, { candles: Candle[]; timeZone: string }>()
   #detachPush: (() => void) | undefined
 
   constructor(
@@ -105,14 +105,11 @@ class FutuProvider implements MarketDataProvider {
     // One push listener for the whole provider: it folds every pushed bar into
     // whichever warm series owns it, so reads never wait on the network.
     this.#detachPush = this.#session.onKLine((key, bars) => {
-      const series = this.#series.get(key)
-      if (series === undefined) return
-      // The push carries the instrument's own timezone implicitly; the cached
-      // series was normalised with it, and `toCandles` prefers the wire epoch,
-      // so the zone argument only matters for the pre-epoch fallback path.
-      const fresh = toCandles(bars as FutuKLine[], 'UTC')
-      if (fresh.length === 0) return
-      this.#series.set(key, mergeBars(series, fresh))
+      const warm = this.#series.get(key)
+      if (warm === undefined) return
+      const candles = mergeKLinePush(warm.candles, bars as FutuKLine[], warm.timeZone)
+      if (candles === warm.candles) return
+      this.#series.set(key, { ...warm, candles })
     })
   }
 
@@ -133,12 +130,13 @@ class FutuProvider implements MarketDataProvider {
     // Seed once from the snapshot; after that the push keeps it current and a
     // read costs nothing. Without this the panel's live refresh would spend a
     // Futu request per tick, which is exactly what the push exists to avoid.
-    let candles = this.#series.get(key)
-    if (candles === undefined) {
+    let warm = this.#series.get(key)
+    if (warm === undefined) {
       const { klList } = await this.#session.getKL(market, code, klType, this.#bars)
-      candles = toCandles(klList as FutuKLine[], timeZone)
-      this.#series.set(key, candles)
+      warm = { candles: toCandles(klList as FutuKLine[], timeZone), timeZone }
+      this.#series.set(key, warm)
     }
+    let candles = warm.candles
     if (query.start !== undefined) {
       const start = Date.parse(query.start)
       candles = candles.filter(c => Date.parse(c.time) >= start)

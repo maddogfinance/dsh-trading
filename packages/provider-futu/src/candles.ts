@@ -170,3 +170,16 @@ export function mergeBars(series: readonly Candle[], fresh: readonly Candle[]): 
   if (!changed) return series as Candle[]
   return [...byTime.values()].sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
 }
+
+/**
+ * Normalise a pushed KLine batch in its exchange timezone, then fold it into
+ * the warm series. The timezone matters whenever an older OpenD omits the
+ * unambiguous epoch timestamp and leaves only its exchange wall clock.
+ */
+export function mergeKLinePush(
+  series: readonly Candle[],
+  pushed: readonly FutuKLine[],
+  timeZone: string,
+): Candle[] {
+  return mergeBars(series, toCandles(pushed, timeZone))
+}
