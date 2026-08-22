@@ -5,7 +5,7 @@
  * still looks perfectly plausible.
  */
 import { describe, expect, it } from 'vitest'
-import { mergeBars, toCandle, toCandles, wallClockToEpochMs } from '../src/candles.js'
+import { mergeBars, mergeKLinePush, toCandle, toCandles, wallClockToEpochMs } from '../src/candles.js'
 import type { FutuKLine } from '../src/candles.js'
 
 const OHLC = { openPrice: 10, highPrice: 12, lowPrice: 9, closePrice: 11 }
@@ -168,5 +168,20 @@ describe('mergeBars', () => {
     ])
     const times = merged.map(c => Date.parse(c.time))
     expect(times).toEqual([...times].sort((a, b) => a - b))
+  })
+})
+
+describe('mergeKLinePush', () => {
+  it('uses the exchange timezone when a pushed US bar has no epoch timestamp', () => {
+    const first: FutuKLine = {
+      ...OHLC,
+      time: '2026-07-15 09:30:00',
+      volume: 10,
+    }
+    const seeded = toCandles([first], 'America/New_York')
+    const merged = mergeKLinePush(seeded, [{ ...first, closePrice: 11.5, volume: 20 }], 'America/New_York')
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ time: '2026-07-15T13:30:00.000Z', close: 11.5, volume: 20 })
   })
 })
