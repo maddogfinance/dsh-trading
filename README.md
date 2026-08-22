@@ -17,7 +17,7 @@ persistent, live chart column on the left, the conversation on the right.
 │s │  │  ╱╲   ╱  ╲__╱  ╲_ ── 118,400 │  │  118.4k; the 15m ADX …  │
 │e │  │ ╱  ╲_╱          ╲ ── 116,900 │  │                         │
 │s │  │▁▂▃▁▂▄▃▁▂▃▅▂▁▃▂▁▄▃▁▂▃         │  │  ▸ annotate_chart       │
-│s │  └──────────────────────────────┘  │    ✎ 8 marks — Show     │
+│s │  └──────────────────────────────┘  │    ✎ 6 marks — Show     │
 │  │  ● live · 15m · 5:05:10 PM   📌    │                         │
 └──┴────────────────────────────────────┴─────────────────────────┘
    rail        the chart you drive          the agent you talk to
@@ -26,9 +26,11 @@ persistent, live chart column on the left, the conversation on the right.
 The column is **yours**: type a symbol, pick a timeframe, and it fetches over a
 loopback channel without going through the model at all. It also **follows the
 conversation** — when the agent charts something, the column loads that
-instrument *live* rather than mirroring the agent's frozen snapshot. Pin it
-(📌) and it stops following; the agent's next drawing arrives as a **Show**
-offer on a pill instead of taking the chart out from under you.
+instrument *live* rather than mirroring the agent's frozen snapshot. Touching
+the chart at all — a symbol, a timeframe — **pins** it, and a 📌 chip says so;
+from then on the agent's drawings arrive as a **Show** offer on a pill instead
+of taking the chart out from under you. Click the chip to start following
+again.
 
 Drawings work the same way in both directions. `annotate_chart` levels, zones
 and paths land on the live column; the *prose* half of the same analysis —
@@ -39,19 +41,36 @@ one-line context injection each turn) instead of asking you to screenshot it.
 
 ## Demo
 
+![The chart column is pinned to Micron while the agent's marks are for Bitcoin, so nothing lands; a pill offers them, and one click loads that chart with its six marks](media/workbench-preview.gif)
+
+The column is pinned to Micron. The agent's six marks are for Bitcoin — a
+different instrument, so the predicate refuses the merge and **nothing lands
+on the wrong chart**. They are offered on a pill instead; one click loads that
+chart with its marks. The clock in the top-right corner is a live feed off a
+local OpenD, ticking through the whole clip.
+
+▶ **90-second demo with narration** — the full cut walks the shell, the symbol
+box, the agent drawing on the live column, the pin-and-offer above, and the
+per-turn context line that lets the agent read your chart without asking for a
+screenshot. It is a real session against live data; the project that builds it
+is `demo/videos/dsh-trading-demo` (Playwright captures the UI, HyperFrames
+composes and renders).
+
+<details>
+<summary>The earlier v0.2 demo — chart cards in the chat feed</summary>
+
 ▶ **[80-second demo with narration on YouTube](https://www.youtube.com/watch?v=9KLpy-jPtKY)**
 
-*Recorded against v0.2 — the chart-**card** flow inside dsh's stock
-three-column shell.* Everything it shows still works and is still how the
-`web` surface behaves without `@dsh-trading/client-frame`: the agent answers
-with an interactive chart card, chips draw indicator panes from the exact
-per-bar series the model read, and `annotate_chart` puts levels on the chart
-through a trust gate — mandatory provenance, prices validated against the real
-candle window. All footage is a live session, no mockups. It **predates** the
-chart-first workbench above (persistent live column, follow/pin/Show, the
-prose split); a recording of that is pending.
+Recorded before the chart-first shell existed, and still exactly how the `web`
+surface behaves *without* `@dsh-trading/client-frame`: the agent answers with
+an interactive chart card, chips draw indicator panes from the exact per-bar
+series the model read, and `annotate_chart` puts levels on the chart through a
+trust gate — mandatory provenance, prices validated against the real candle
+window.
 
 [![Interactive chart cards in dsh web: chips toggle indicator panes drawn from the model's own numbers; annotate_chart draws provenance-gated levels](media/demo-preview.gif)](https://www.youtube.com/watch?v=9KLpy-jPtKY)
+
+</details>
 
 ## Design
 
