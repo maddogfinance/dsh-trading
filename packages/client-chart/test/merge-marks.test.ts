@@ -8,7 +8,7 @@
  * below it disagree, which is the exact failure this feature exists to prevent.
  */
 import { describe, expect, it } from 'vitest'
-import { mergeMarks, readMarks } from '../src/client/market-client.js'
+import { mergeMarks, readMarks, recallMarks, rememberMarks } from '../src/client/market-client.js'
 import type { ChartMarks } from '../src/client/market-client.js'
 import type { ChartPayload } from '../src/client/payload.js'
 
@@ -42,6 +42,7 @@ function marksOf(over: Partial<ChartMarks> = {}): ChartMarks {
     key: 'k',
     provider: 'futu',
     symbol: 'US.MU',
+    rawSymbol: 'US.MU',
     timeframe: '1d',
     annotations: [level(150)],
     scenarios: [],
@@ -249,5 +250,51 @@ describe('mergeMarks — what it must never touch', () => {
   it('handles an empty series without inventing a range', () => {
     const empty = chart({ timeframes: [{ timeframe: '1d', candles: [], indicators: null, annotations: [] }] })
     expect(mergeMarks(empty, marksOf())).toMatchObject({ applied: true, kept: 0 })
+  })
+})
+
+describe('remembering marks across a reload', () => {
+  // jsdom is not configured for this package, so stand in a minimal store.
+  const store = new Map<string, string>()
+  const shim = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { store.set(k, v) },
+    removeItem: (k: string) => { store.delete(k) },
+  }
+  ;(globalThis as { sessionStorage?: unknown }).sessionStorage = shim
+
+  const marks = marksOf({ rawSymbol: 'CC.btcUsdt' })
+
+  it('round-trips the marks a tab was showing', () => {
+    // The card that drew them scrolls out of the conversation and stops
+    // publishing; without this the drawing does not come back on reload.
+    rememberMarks(marks)
+    expect(recallMarks()).toMatchObject({ symbol: 'US.MU', timeframe: '1d', rawSymbol: 'CC.btcUsdt' })
+  })
+
+  it('forgets on request', () => {
+    rememberMarks(marks)
+    rememberMarks(null)
+    expect(recallMarks()).toBeNull()
+  })
+
+  it('returns null rather than trusting a malformed record', () => {
+    // This value feeds the merge predicate and therefore what gets drawn.
+    store.set('dsh-trading:chart-marks', '{"key":"k"}')
+    expect(recallMarks()).toBeNull()
+    store.set('dsh-trading:chart-marks', 'not json')
+    expect(recallMarks()).toBeNull()
+  })
+
+  it('survives storage being unavailable', () => {
+    const saved = (globalThis as { sessionStorage?: unknown }).sessionStorage
+    ;(globalThis as { sessionStorage?: unknown }).sessionStorage = {
+      getItem() { throw new Error('blocked') },
+      setItem() { throw new Error('blocked') },
+      removeItem() { throw new Error('blocked') },
+    }
+    expect(() => rememberMarks(marks)).not.toThrow()
+    expect(recallMarks()).toBeNull()
+    ;(globalThis as { sessionStorage?: unknown }).sessionStorage = saved
   })
 })
