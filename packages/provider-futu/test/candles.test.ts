@@ -102,6 +102,20 @@ describe('toCandle', () => {
     expect(() => toCandle(kl, 'Asia/Hong_Kong')).toThrow(/non-numeric OHLC/)
   })
 
+  it('throws when open or close lies outside the reported low/high range', () => {
+    for (const kl of [
+      { ...OHLC, openPrice: 13, timestamp: 1_772_415_000 },
+      { ...OHLC, closePrice: 8, timestamp: 1_772_415_000 },
+    ]) {
+      expect(() => toCandle(kl, 'Asia/Hong_Kong')).toThrow(/low <= open\/close <= high/)
+    }
+  })
+
+  it('throws on negative volume', () => {
+    const kl: FutuKLine = { ...OHLC, timestamp: 1_772_415_000, volume: -1 }
+    expect(() => toCandle(kl, 'Asia/Hong_Kong')).toThrow(/negative volume/)
+  })
+
   it('throws when the bar carries no time at all', () => {
     expect(() => toCandle({ ...OHLC }, 'Asia/Hong_Kong')).toThrow(/neither timestamp nor time/)
   })
