@@ -114,6 +114,13 @@ export function toCandle(kl: FutuKLine, timeZone: string): Candle | null {
   if ([open, high, low, close].some(v => typeof v !== 'number' || !Number.isFinite(v))) {
     throw new Error(`Futu KLine at ${new Date(epochMs).toISOString()} has a non-numeric OHLC field`)
   }
+  if (high! < Math.max(open!, close!) || low! > Math.min(open!, close!)) {
+    throw new Error(`Futu KLine at ${new Date(epochMs).toISOString()} must satisfy low <= open/close <= high`)
+  }
+  const volume = toNumber(kl.volume)
+  if (volume < 0) {
+    throw new Error(`Futu KLine at ${new Date(epochMs).toISOString()} has negative volume`)
+  }
 
   return {
     time: new Date(epochMs).toISOString(),
@@ -121,7 +128,7 @@ export function toCandle(kl: FutuKLine, timeZone: string): Candle | null {
     high: high as number,
     low: low as number,
     close: close as number,
-    volume: toNumber(kl.volume),
+    volume,
   }
 }
 
