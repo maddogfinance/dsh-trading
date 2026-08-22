@@ -49,10 +49,11 @@ on the wrong chart**. They are offered on a pill instead; one click loads that
 chart with its marks. The clock in the top-right corner is a live feed off a
 local OpenD, ticking through the whole clip.
 
-The loop above is one beat of a 90-second narrated cut that also walks the
-shell, the symbol box, the agent drawing on the live column, and the per-turn
-context line that lets it read your chart without asking for a screenshot.
-*(Upload pending — this line gets its link when it lands.)*
+▶ **[Watch the full 90-second demo with narration](https://www.youtube.com/watch?v=ULeROBoBGTc)** —
+the loop above is one beat of it. The full cut also walks the shell, the
+symbol box and the timeframe row, the agent drawing on the live column, and
+the per-turn context line that lets it read your chart without asking for a
+screenshot.
 
 None of it is a mockup: the footage is 1920x1080 Playwright captures of a real
 session against a live Futu OpenD, and the chart keeps ticking through every
