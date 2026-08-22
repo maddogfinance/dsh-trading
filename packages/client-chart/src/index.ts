@@ -1,15 +1,19 @@
 /**
- * Host half of the chart-card package. Two jobs, both small:
+ * Host half of the chart-card package. Three jobs, all small:
  *
  *  1. Give the profile's Loader row a plugin to mount, so the dsh web host
  *     scans the package's `dsh.client` manifest and serves the browser bundle.
  *  2. Publish a loopback RPC channel the persistent chart column reads from,
  *     so the user can put a symbol on the chart WITHOUT going through the
  *     model. See ./market-rpc.ts for why that matters.
+ *  3. Report what that column is showing back to the model, as a per-turn
+ *     context line and as the `get_chart_view` tool.
  *
- * Under a headless profile there is no `connection` service; the row then does
- * nothing at all rather than failing to load — the channel is a web affordance,
- * not a capability the rest of the bundle depends on.
+ * Only (1) and (2) are web-only. Under a headless profile there is no
+ * `connection` service, so the channel never appears — the row keeps loading
+ * rather than failing, and (3) still registers, reporting a closed panel. The
+ * channel is a web affordance, not a capability the rest of the bundle
+ * depends on.
  * @module @dsh-trading/client-chart
  */
 

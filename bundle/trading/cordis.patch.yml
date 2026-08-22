@@ -29,8 +29,10 @@
     - id: risk-guard
       name: '@dsh-trading/risk-guard'
 
-    # Web-only candlestick cards for market_snapshot / get_ohlcv results.
-    # Harmless under headless profiles (the host half is a no-op); remove the
-    # row if you want the generic text cards back.
+    # Candlestick cards for market_snapshot / get_ohlcv results, plus the
+    # persistent chart column and the loopback channel that feeds it. Those
+    # are web-only; under a headless profile the row still registers
+    # `get_chart_view` and the per-turn context line, which simply report a
+    # closed panel. Remove the row for the generic text cards.
     - id: client-chart
       name: '@dsh-trading/client-chart'
