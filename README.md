@@ -49,12 +49,14 @@ on the wrong chart**. They are offered on a pill instead; one click loads that
 chart with its marks. The clock in the top-right corner is a live feed off a
 local OpenD, ticking through the whole clip.
 
-▶ **90-second demo with narration** — the full cut walks the shell, the symbol
-box, the agent drawing on the live column, the pin-and-offer above, and the
-per-turn context line that lets the agent read your chart without asking for a
-screenshot. It is a real session against live data; the project that builds it
-is `demo/videos/dsh-trading-demo` (Playwright captures the UI, HyperFrames
-composes and renders).
+The loop above is one beat of a 90-second narrated cut that also walks the
+shell, the symbol box, the agent drawing on the live column, and the per-turn
+context line that lets it read your chart without asking for a screenshot.
+*(Upload pending — this line gets its link when it lands.)*
+
+None of it is a mockup: the footage is 1920x1080 Playwright captures of a real
+session against a live Futu OpenD, and the chart keeps ticking through every
+shot.
 
 <details>
 <summary>The earlier v0.2 demo — chart cards in the chat feed</summary>
