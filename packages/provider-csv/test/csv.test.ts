@@ -117,6 +117,22 @@ describe('parseCsv', () => {
     const body = [HEADER, '2024-01-01T00:00:00Z,10,12,9,11,NaN'].join('\n')
     expect(() => parseCsv(body, 'fixture.csv')).toThrow('fixture.csv:2: non-numeric OHLCV cell')
   })
+
+  it('rejects an open or close outside the reported low/high range', () => {
+    for (const row of [
+      '2024-01-01T00:00:00Z,10,9,8,8.5,100',
+      '2024-01-01T00:00:00Z,10,11,10.5,10,100',
+    ]) {
+      expect(() => parseCsv([HEADER, row].join('\n'), 'fixture.csv')).toThrow(
+        'fixture.csv:2: OHLC must satisfy low <= open/close <= high',
+      )
+    }
+  })
+
+  it('rejects negative volume', () => {
+    const body = [HEADER, '2024-01-01T00:00:00Z,10,12,9,11,-1'].join('\n')
+    expect(() => parseCsv(body, 'fixture.csv')).toThrow('fixture.csv:2: volume must be non-negative')
+  })
 })
 
 describe('apply', () => {
