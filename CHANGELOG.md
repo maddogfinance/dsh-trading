@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `@dsh-trading/verdict` — fill validation now rejects trades timestamped
+  inside calendar or session gaps between candles instead of mapping them to
+  the preceding bar. A weekend fill can no longer pass merely because its
+  price falls inside Friday's range.
+
 ## 0.2.0 — 2026-08-19
 
 - New package `@dsh-trading/verdict` — the evaluation harness, first
