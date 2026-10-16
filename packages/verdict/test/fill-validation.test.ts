@@ -31,6 +31,14 @@ describe("barIndexAt", () => {
     expect(barIndexAt(times, Date.parse("2026-01-01T00:00:00Z"))).toBe(0)
     expect(barIndexAt(times, Date.parse("2025-12-31T23:59:59Z"))).toBe(-1)
   })
+
+  it("does not map a session gap onto the preceding bar", () => {
+    const DAY = 86_400_000
+    const times = ["2026-01-09T00:00:00Z", "2026-01-12T00:00:00Z"].map(Date.parse)
+    expect(barIndexAt(times, Date.parse("2026-01-09T23:59:59Z"), DAY)).toBe(0)
+    expect(barIndexAt(times, Date.parse("2026-01-10T12:00:00Z"), DAY)).toBe(-1)
+    expect(barIndexAt(times, Date.parse("2026-01-12T00:00:00Z"), DAY)).toBe(1)
+  })
 })
 
 describe("fill validation", () => {
@@ -56,6 +64,20 @@ describe("fill validation", () => {
     const late = trade({ exitTime: "2026-03-01T00:00:00Z", exitPrice: 104 })
     const result = validateFills([late], bars(), { durationMs: DAY })
     expect(result.issues.some(i => i.kind === "exit-outside-data")).toBe(true)
+  })
+
+  it("REGRESSION: a fill inside a session gap is outside the candle window", () => {
+    const DAY = 86_400_000
+    const fridayAndMonday = [bars()[8]!, { ...bars()[9]!, time: "2026-01-12T00:00:00.000Z" }]
+    const weekend = trade({
+      entryTime: "2026-01-10T12:00:00Z",
+      exitTime: "2026-01-10T18:00:00Z",
+      entryPrice: 104,
+      exitPrice: 106,
+    })
+    const result = validateFills([weekend], fridayAndMonday, { durationMs: DAY })
+    expect(result.issues).toEqual([expect.objectContaining({ kind: "entry-outside-data" })])
+    expect(result.tradesOutsideData).toBe(1)
   })
 
   it("counts close-priced entries and same-bar round trips", () => {

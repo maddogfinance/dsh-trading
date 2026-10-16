@@ -42,20 +42,20 @@ function withinBar(price: number, bar: Candle, tolerancePct: number): boolean {
 /**
  * Index of the bar containing instant `t`: the last bar whose open time is
  * <= t. Returns -1 when t precedes the first bar — or, when `durationMs` is
- * given, when t falls at/after the LAST bar's close boundary (a time the
- * data simply does not cover; without the bound, fabricated far-future
- * trades would be silently validated against the final bar).
+ * given, when t falls at/after that bar's close boundary. The latter check
+ * rejects instants inside calendar/session gaps instead of silently mapping
+ * them onto the preceding bar.
  */
 export function barIndexAt(barTimes: readonly number[], t: number, durationMs?: number): number {
   let lo = 0
   let hi = barTimes.length - 1
   if (hi < 0 || t < barTimes[0]!) return -1
-  if (durationMs !== undefined && t >= barTimes[hi]! + durationMs) return -1
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1
     if (barTimes[mid]! <= t) lo = mid
     else hi = mid - 1
   }
+  if (durationMs !== undefined && t >= barTimes[lo]! + durationMs) return -1
   return lo
 }
 
