@@ -70,8 +70,13 @@ function isFiniteNumber(x: unknown): x is number {
   return typeof x === 'number' && Number.isFinite(x)
 }
 
-function isIsoParseable(x: unknown): x is string {
-  return typeof x === 'string' && Number.isFinite(Date.parse(x))
+function isIsoInstant(x: unknown): x is string {
+  if (typeof x !== 'string') return false
+  // Date.parse accepts naive local datetimes and implementation-specific prose.
+  // Require an ISO date-time with an explicit zone so the same artifact maps to
+  // the same candles on every machine. Date.parse still validates the calendar.
+  const explicitZone = /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}(?::?\d{2})?)$/i
+  return explicitZone.test(x) && Number.isFinite(Date.parse(x))
 }
 
 /**
@@ -94,8 +99,8 @@ export function parseArtifact(value: unknown): BacktestArtifact {
   a.trades.forEach((t, i) => {
     if (typeof t !== 'object' || t === null) throw new Error(`trades[${i}] must be an object`)
     const trade = t as Record<string, unknown>
-    if (!isIsoParseable(trade.entryTime)) throw new Error(`trades[${i}].entryTime is not a parseable ISO-8601 time`)
-    if (!isIsoParseable(trade.exitTime)) throw new Error(`trades[${i}].exitTime is not a parseable ISO-8601 time`)
+    if (!isIsoInstant(trade.entryTime)) throw new Error(`trades[${i}].entryTime must be an ISO-8601 time with an explicit timezone (Z or offset)`)
+    if (!isIsoInstant(trade.exitTime)) throw new Error(`trades[${i}].exitTime must be an ISO-8601 time with an explicit timezone (Z or offset)`)
     if (Date.parse(trade.exitTime as string) < Date.parse(trade.entryTime as string)) {
       throw new Error(`trades[${i}] exits before it enters`)
     }

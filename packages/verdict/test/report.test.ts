@@ -91,6 +91,21 @@ describe("parseArtifact", () => {
     expect(() => parseArtifact(bad)).toThrow(/exits before/)
   })
 
+  it("rejects local datetimes whose meaning depends on the machine timezone", () => {
+    for (const field of ["entryTime", "exitTime"] as const) {
+      const bad = JSON.parse(JSON.stringify(artifact))
+      bad.trades[0][field] = "2026-01-02T09:30:00"
+      expect(() => parseArtifact(bad)).toThrow(new RegExp(`trades\\[0\\]\\.${field}.*explicit timezone`))
+    }
+  })
+
+  it("accepts explicit ISO-8601 offsets as deterministic instants", () => {
+    const offset = JSON.parse(JSON.stringify(artifact))
+    offset.trades[0].entryTime = "2026-01-02T08:00:00+08:00"
+    offset.trades[0].exitTime = "2026-01-05T08:00:00+08:00"
+    expect(parseArtifact(offset)).toEqual(offset)
+  })
+
   it("REGRESSION: a null trade element gets a named error, not a TypeError", () => {
     const bad = JSON.parse(JSON.stringify(artifact))
     bad.trades[0] = null
