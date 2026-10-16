@@ -57,6 +57,12 @@ export function parseCsv(body: string, file: string): Candle[] {
     if ([open, high, low, close, volume].some(v => !Number.isFinite(v))) {
       throw new Error(`${file}:${i + 2}: non-numeric OHLCV cell`)
     }
+    if (high! < Math.max(open!, close!) || low! > Math.min(open!, close!)) {
+      throw new Error(`${file}:${i + 2}: OHLC must satisfy low <= open/close <= high`)
+    }
+    if (volume! < 0) {
+      throw new Error(`${file}:${i + 2}: volume must be non-negative`)
+    }
     return { time: time!, open: open!, high: high!, low: low!, close: close!, volume: volume! }
   })
 }
