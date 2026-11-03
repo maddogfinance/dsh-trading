@@ -19,10 +19,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import type { ChartOwnerProps } from '@dsh-trading/client-frame/client'
-import { ChartBody } from './ChartCard.js'
-import { getLatestChart, subscribeLatestChart } from './latest.js'
+import { ChartBody, useDark } from './ChartCard.js'
+import { getLatestChart, setColumnOpen, subscribeLatestChart } from './latest.js'
 import { decideFollow } from './follow.js'
-import { mergeMarks, mergeTail, readMarks, recallMarks, rememberMarks, withCandles } from './market-client.js'
+import { getLessonSnapshot, lesson, subscribeLesson } from './lesson.js'
+import { LessonLayer } from './LessonLayer.js'
+import { mergeMarks, mergeTail, readMarks, recallMarks, rememberMarks, withCandles, withLessonSeries } from './market-client.js'
 import type { ChartMarks, MarketClient } from './market-client.js'
 import type { ChartPayload } from './payload.js'
 
@@ -106,6 +108,9 @@ const TF_BUTTON = (on: boolean): CSSProperties => ({
   fontWeight: on ? 600 : 400,
 })
 
+/** Case- and space-insensitive instrument identity. */
+const sameSymbol = (a: string, b: string): boolean => a.trim().toUpperCase() === b.trim().toUpperCase()
+
 const NOTE: CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center', justifyContent: 'center',
   height: '100%', padding: '0 24px', textAlign: 'center', fontSize: 13,
@@ -128,6 +133,10 @@ export interface ChartPanelInject {
  */
 export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject): JSX.Element | null {
   const fromAgent = useSyncExternalStore(subscribeLatestChart, getLatestChart, getLatestChart)
+  // The analyst's walkthrough, when one is on: what to show for the line being said.
+  const talk = useSyncExternalStore(subscribeLesson, getLessonSnapshot, getLessonSnapshot)
+  const board = talk.board
+  const dark = useDark()
 
   const [draft, setDraft] = useState('')
   const [timeframe, setTimeframe] = useState<string>('1d')
@@ -171,17 +180,28 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     })
   }, [fromAgent])
 
+  // A walkthrough draws on the column only once the column holds the very
+  // series the section was told on; until then it is loading that series.
+  const lessonOn = board !== null && own !== null && own.provider === board.provider
+    && sameSymbol(own.symbol, board.symbol) && own.timeframes[0]?.timeframe === board.timeframe
+  const lessonPayload = useMemo(
+    () => lessonOn && own !== null ? withLessonSeries(own, board?.series) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lessonOn, own, board?.series],
+  )
+
   const active = marks !== null && marks.key !== dismissed ? marks : null
+  // annotate_chart's marks stand down while the analyst is talking: one voice on the chart at a time.
   const merged = useMemo(
-    () => own !== null && active !== null ? mergeMarks(own, active) : null,
-    [own, active],
+    () => own !== null && active !== null && !lessonOn ? mergeMarks(own, active) : null,
+    [own, active, lessonOn],
   )
 
   // The panel's own lookup takes precedence: an agent answer arriving mid-read
   // must not replace what the user deliberately put on screen. Its DRAWINGS
   // are welcome on top of it, which is what `merged` carries; when they are
   // about a different chart, mergeMarks hands the payload straight back.
-  const payload = merged?.payload ?? own ?? fromAgent
+  const payload = lessonPayload ?? merged?.payload ?? own ?? fromAgent
 
   const load = useCallback(async (symbol: string, tf: string, trigger: 'user' | 'follow' = 'user') => {
     inflight.current?.abort()
@@ -234,7 +254,10 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   //
   // Debounced because an analysis can call annotate_chart dozens of times in
   // one turn; only the settled target is worth a fetch.
+  const talking = board !== null
   useEffect(() => {
+    // A walkthrough decides what is on the column while it is on.
+    if (talking) return
     const decision = decideFollow(
       fromAgent === null
         ? null
@@ -254,7 +277,27 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
       void load(decision.symbol, decision.timeframe, 'follow')
     }, FOLLOW_SETTLE_MS)
     return () => clearTimeout(followTimer.current)
-  }, [fromAgent, own, pinned, width, load])
+  }, [fromAgent, own, pinned, width, load, talking])
+
+  // Follow the walkthrough onto the series its section is told on. It
+  // overrides a pin: the reader is listening to the analyst talk about this
+  // chart. Touching the symbol or the timeframe hands the chart back.
+  const boardSeries = board === null ? null : `${board.symbol}|${board.timeframe}`
+  const ownSeries = own === null ? null : `${own.symbol}|${own.timeframes[0]?.timeframe ?? ''}`
+  useEffect(() => {
+    if (board === null || width === 0) return
+    if (ownSeries !== null && sameSymbol(ownSeries, boardSeries!)) return
+    if (failedFollow.current === boardSeries) return
+    setTimeframe(board.timeframe)
+    void load(board.symbol, board.timeframe, 'follow')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardSeries, ownSeries, width, load])
+
+  // Tell the chat cards whether the chart lives here, so a data read collapses to one line.
+  useEffect(() => {
+    setColumnOpen(width > 0)
+    return () => setColumnOpen(false)
+  }, [width])
 
   // One symbols probe on mount, purely to tell the user what this provider
   // actually carries — a wrong-format symbol is the likeliest first mistake.
@@ -417,11 +460,13 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     e.preventDefault()
     const symbol = draft.trim()
     if (symbol === '') return
+    if (board !== null) lesson.dismiss()
     setPinned(true)
     void load(symbol, activeTimeframe)
   }
 
   const pickTimeframe = (tf: string): void => {
+    if (board !== null) lesson.dismiss()
     setPinned(true)
     setTimeframe(tf)
     // Prefer the symbol on screen over the draft: switching the period of a
@@ -433,7 +478,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   // The agent's drawings, and what to do about them. Suppressed while the body
   // is showing a loading or error screen: `own` survives a failed lookup, so a
   // pill there would claim marks over an error message.
-  const showPill = active !== null && own !== null && error === null && !(busy && payload === null)
+  const showPill = active !== null && own !== null && error === null && !(busy && payload === null) && !lessonOn
   // Scenarios draw their own trigger/invalidation lines, so a scenario-only
   // analysis is not "0 marks".
   const markCount = active === null ? 0 : active.annotations.length + active.scenarios.length
@@ -531,6 +576,33 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
             </button>
           )
           : null}
+        {board !== null
+          ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span
+                style={{ ...TF_BUTTON(true), cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                title="The analyst is talking you through this chart; click a line in the chat to see that moment again."
+              >
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: '#65f84f', boxShadow: '0 0 0 1.5px currentColor' }} />
+                {talk.mode === 'live' ? 'speaking' : talk.mode === 'paused' ? (talk.look ? 'waiting for you' : 'paused') : talk.mode === 'replay' ? 'looking back' : 'walkthrough'}
+                {talk.section !== null ? ` · ${talk.section}` : ''}
+                {!lessonOn ? ' · loading' : ''}
+              </span>
+              {talk.mode === 'live' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.pause()}>Pause</button> : null}
+              {talk.mode === 'paused' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.resume()}>Resume</button> : null}
+              {talk.mode === 'replay' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.backToLive()}>Back</button> : null}
+              {talk.mode === 'live' || talk.mode === 'paused' ? <button type="button" style={TF_BUTTON(false)} title="Show every line now" onClick={() => lesson.skipAll()}>Show all</button> : null}
+              <button
+                type="button"
+                style={{ ...TF_BUTTON(false), padding: '2px 5px' }}
+                title="Put the chart back to normal"
+                onClick={() => lesson.dismiss()}
+              >
+                ×
+              </button>
+            </span>
+          )
+          : null}
         {marksPill}
         <button
           type="button"
@@ -558,7 +630,26 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
               </div>
             )
             : payload !== null
-              ? <ChartBody payload={payload} shell={PANEL_SHELL} fill prose={false} />
+              ? (
+                <ChartBody
+                  payload={payload}
+                  shell={PANEL_SHELL}
+                  fill
+                  prose={false}
+                  forceChips={lessonOn ? (board?.pane !== undefined ? [board.pane] : []) : undefined}
+                  overlay={lessonOn
+                    ? ready => (
+                      <LessonLayer
+                        chart={ready.chart}
+                        panes={ready.panes}
+                        board={board}
+                        dark={dark}
+                        onUserMove={() => lesson.pause(true)}
+                      />
+                    )
+                    : undefined}
+                />
+              )
               : (
                 <div style={NOTE}>
                   <p>Type a symbol above, or ask the agent for one.</p>

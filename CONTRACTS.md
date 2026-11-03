@@ -146,7 +146,61 @@ Additive-only within version 1; readers MUST ignore unknown fields.
   shadow returns and reports self-reported vs shadow as the fill-model gap,
   so optimistic intrabar pricing surfaces instead of scoring.
 
-## 7. Deferred (design notes, not yet contracts)
+## 7. Walkthrough payload — `kind: 'walkthrough'`, `version: 1`
+
+One section of an analysis told to the reader on their chart: a few spoken
+lines, each moving the chart. Produced by `walkthrough`
+(`@dsh-trading/tool-market`, resolver in `src/walkthrough.ts`), carried on the
+tool result's `meta` like §2, consumed by the walkthrough card and the chart
+column in `@dsh-trading/client-chart`.
+
+```jsonc
+{
+  "kind": "walkthrough", "version": 1,
+  "provider": "public", "symbol": "AAPL", "timeframe": "1d", "section": "双顶",
+  "window": { "from": 1791293400000, "to": 1793629800000 },   // bar open times, ms (2026-10-06 → 2026-11-02)
+  "pane": "stoch",                                              // optional: rsi|stoch|adx|macd|mfi
+  "series": { "t": [/* ms */], "cols": { "stoch_k": [/* … */], "stoch_d": [/* … */] } },
+  "marks": [
+    { "id": "p1", "type": "circle", "surface": "price", "tone": "neutral", "at": { "t": 1792762200000, "v": 351.73 } },
+    { "id": "zone", "type": "zone", "surface": "price", "tone": "neutral", "low": 334.35, "high": 337, "keep": true },
+    { "id": "up", "type": "arrow", "surface": "price", "tone": "up", "points": [{ "t": 1793629800000, "v": 338.32 }, { "ahead": 10, "v": 348 }] }
+  ],
+  "lines": [
+    { "say": "[[p1|10/23]] 冲到 351.73，没站住。", "draw": ["p1"], "point": "p1" },
+    { "say": "回到我们一开始说的[[zone|那一段]]。", "focus": "zone", "point": "zone", "volume": [1793629800000] }
+  ],
+  "ask": ["好，你说"],
+  "close": 338.32
+}
+```
+
+- **Anchored, not asserted.** The model names a bar and a field (`{ time,
+  field }`); the producer reads the value off the bars and writes the
+  resolved `{ t, v }`. A value the model states is checked, and a mismatch
+  fails the call with the bar where that value does occur. A level may cite a
+  checkable `source` (`{ field, time }`, or `{ field, stat: 'min'|'max',
+  from, to }`); without one it needs a free-text `why`. Indicator values are
+  computed over the same 300-bar window as `market_snapshot`, so they match
+  what the model read.
+- **Marks** are `circle` (a bar value), `level`, `zone`, `path`/`arrow`
+  (through bars, then optional `ahead` projections), and `span` (a time
+  range). `surface` says which pane: `price`, `volume`, or `indicator` (the
+  section's `pane`). `keep` leaves a mark faintly on the chart through later
+  sections of the same instrument; `focus` on a later line re-lights any
+  earlier mark by id.
+- **Lines** are text the client renders as text, never HTML. Two inline
+  tokens exist: `[[markId|words]]` ties words to a mark (hovering them lights
+  it), `**words**` is bold; anything else is literal.
+- **Pacing is the reader's, not the producer's.** A section that lands live
+  is spoken a line at a time and queues behind the one before it; a section
+  from history shows settled. `ask` offers 1–3 replies once every line is
+  said, and the turn ends there; a tapped reply is sent as the reader's own
+  message.
+- `series` columns are keyed by bar time and drawn by time, not position, so
+  they land on the right bars of a longer, live series.
+
+## 8. Deferred (design notes, not yet contracts)
 
 - **Watch/alert**: a `kind:'watch'` payload naming price-cross conditions is
   the sketch; evaluation source, close-vs-tick semantics, delivery

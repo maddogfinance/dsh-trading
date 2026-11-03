@@ -19,6 +19,8 @@ import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
 import type { AnnotationRole, ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './chart-payload.js'
+import { resolveWalkthrough, WALK_FIELDS, WALK_MARK_TYPES, WALK_PANES } from './walkthrough.js'
+import type { WalkthroughArgs, WalkthroughPayload } from './walkthrough.js'
 
 export { rsi, sma } from './indicators.js'
 export { adx, atr, bollinger, ema, macd, mfi, stochastic } from './candle-indicators.js'
@@ -31,6 +33,10 @@ export type {
   AnnotationRole, ChartAnnotation, ChartCandle, ChartLevelAnnotation, ChartPayload,
   ChartScenario, ChartSeries, ChartTimeframeData, ChartZoneAnnotation,
 } from './chart-payload.js'
+export { resolveWalkthrough, PANE_COLUMNS, WALK_FIELDS, WALK_MARK_TYPES, WALK_PANES } from './walkthrough.js'
+export type {
+  WalkField, WalkLine, WalkMark, WalkPane, WalkPoint, WalkSurface, WalkthroughArgs, WalkthroughPayload,
+} from './walkthrough.js'
 
 export const name = 'tool-market'
 export const inject = ['tools', 'marketData']
@@ -640,6 +646,112 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Annotate: ${args.symbol} @ ${args.timeframe}`,
+      kind: 'other',
+      rawInput: args,
+    }),
+  }))
+
+  const point = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      time: { type: 'string', description: 'Bar: a date (YYYY-MM-DD) on daily/weekly charts, the bar-open ISO time on intraday ones.' },
+      field: { type: 'string', enum: [...WALK_FIELDS], description: 'What on that bar: high, low, close, volume, or an indicator value.' },
+      value: { type: 'number', description: 'The value you are about to say, if any. Checked against the bar.' },
+      ahead: { type: 'integer', description: 'Paths only: a projection this many bars past the last one (with price).' },
+      price: { type: 'number', description: 'Paths only: the projected price for an ahead point.' },
+    },
+  } as const
+
+  ctx.tools.register(defineTool({
+    name: 'walkthrough',
+    description: 'Tell one section of your analysis to the reader on their own chart, the way an analyst sitting beside them would: a few short spoken lines (one or two sentences each), each moving the chart. Circle a bar, draw a level, light up a zone, point at something. Call it once per section, conclusion first; a later section can re-light an earlier mark with focus. Marks are anchored to bars ({ time, field }) and the tool reads the value off the bar, so take the numbers you say from it. A level needs a checkable source or at least a why. End a section with ask (1–3 short replies the reader can tap) to stop and let them answer; then end your turn. Research only: no entries, sizes or recommendations.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Instrument symbol exactly as list_symbols reports it.' },
+      timeframe: { type: 'string', required: true, enum: [...TIMEFRAMES], description: 'The chart this section is told on.' },
+      section: { type: 'string', required: true, description: 'Short section title, e.g. "结论", "大背景", "双顶", "接下来".' },
+      from: { type: 'string', description: 'First bar the chart frames (date or ISO time). Default: the last 60 bars.' },
+      pane: { type: 'string', enum: [...WALK_PANES], description: 'Indicator pane to open under the chart for this section.' },
+      marks: {
+        type: 'array',
+        description: 'What this section draws. Each mark is drawn by the line that talks about it.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', required: true, description: 'Short id, unique in this section; lines and later sections refer to it.' },
+            type: { type: 'string', required: true, enum: [...WALK_MARK_TYPES], description: 'circle a bar value; level; zone; path or arrow through bars; span of time.' },
+            at: { ...point, description: 'circle: the bar and field to circle.' },
+            price: { type: 'number', description: 'level: the price.' },
+            low: { type: 'number', description: 'zone: lower edge.' },
+            high: { type: 'number', description: 'zone: upper edge.' },
+            points: { type: 'array', items: point, description: 'path/arrow: bar points, then optional ahead projections.' },
+            from: { type: 'string', description: 'span: first bar.' },
+            to: { type: 'string', description: 'span: last bar (default: the latest).' },
+            source: {
+              type: 'object',
+              additionalProperties: false,
+              description: 'level: where the price comes from, checked against the bars.',
+              properties: {
+                field: { type: 'string', required: true, enum: [...WALK_FIELDS] },
+                time: { type: 'string', description: 'The bar the value is read on (default: the latest).' },
+                stat: { type: 'string', enum: ['min', 'max'], description: 'Lowest/highest field over from…to.' },
+                from: { type: 'string' },
+                to: { type: 'string' },
+              },
+            },
+            why: { type: 'string', description: 'Plain reason, when no checkable source fits (zones always need one).' },
+            label: { type: 'string', description: 'Short caption on the chart.' },
+            tone: { type: 'string', enum: ['up', 'down', 'neutral'], description: 'up/down for bull/bear signals; neutral otherwise.' },
+            role: { type: 'string', description: 'Accepted for annotate_chart habits: support reads as tone up, resistance as down. Prefer tone.' },
+            pane: { type: 'string', enum: ['price', 'volume', 'indicator'], description: 'level: which pane (default price).' },
+            keep: { type: 'boolean', description: 'Leave it faintly on the chart for later sections (the key zone of a conclusion).' },
+          },
+        },
+      },
+      lines: {
+        type: 'array',
+        required: true,
+        description: 'What you say, in order. Spoken, first person, one or two sentences each.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            say: { type: 'string', required: true, description: 'The line. Wrap the words a mark explains as [[markId|words]].' },
+            draw: { type: 'array', items: { type: 'string' }, description: 'Ids of this section\'s marks to draw as you say it.' },
+            point: { type: 'string', description: 'Mark id to point at (this or an earlier section).' },
+            pointAt: { ...point, description: 'Or point at a bar value without drawing.' },
+            focus: { type: 'string', description: 'Re-light a mark from an earlier section, e.g. the conclusion\'s zone.' },
+            volume: { type: 'array', items: { type: 'string' }, description: 'Bars whose volume to spotlight (the rest dim).' },
+          },
+        },
+      },
+      ask: { type: 'array', items: { type: 'string' }, description: '1–3 short replies the reader can tap after the last line. Then end your turn.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          summary: { type: 'string', required: true },
+          walkthrough: { type: 'json', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.summary }],
+      presentationMeta: (_args, value) => value.walkthrough as WalkthroughPayload,
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const candles = await provider.getOhlcv({ symbol: args.symbol, timeframe: args.timeframe as Timeframe, limit: 400 })
+      if (candles.length === 0) throw new Error(`no candles for ${args.symbol} @ ${args.timeframe}`)
+      const { payload, summary } = resolveWalkthrough(args as unknown as WalkthroughArgs, candles, provider.id)
+      return { summary, walkthrough: payload }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Walkthrough: ${args.section}`,
       kind: 'other',
       rawInput: args,
     }),

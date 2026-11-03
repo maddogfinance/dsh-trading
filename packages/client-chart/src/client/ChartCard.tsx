@@ -12,12 +12,13 @@
  * go through the same registry; unknown types without a renderer fall back
  * to a textual row in the annotations table.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { dispose, init, registerIndicator, registerOverlay } from 'klinecharts'
 import type { Chart, OverlayCreateFiguresCallbackParams } from 'klinecharts'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { publishLatestChart } from './latest.js'
+import type { PaneIds } from './LessonLayer.js'
+import { getColumnOpen, publishLatestChart, subscribeColumn } from './latest.js'
 import { annotationDigest, contentText, readChartPayload } from './payload.js'
 import type { ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './payload.js'
 
@@ -258,7 +259,7 @@ function ensureRegistered(): void {
   } as never)
 }
 
-function useDark(): boolean {
+export function useDark(): boolean {
   const [dark, setDark] = useState(() =>
     typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches)
   useEffect(() => {
@@ -416,7 +417,10 @@ function drawPrimitive(chart: Pick<Chart, 'createOverlay'>, prim: DrawPrimitive,
   }
 }
 
-function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HEIGHT, fill = false }: {
+/** The live chart and the panes it made, for a layer that draws over it. */
+export type KlineReady = { chart: Chart; panes: PaneIds }
+
+function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HEIGHT, fill = false, overlay }: {
   data: ChartTimeframeData
   scenarios: ChartScenario[]
   dark: boolean
@@ -432,9 +436,12 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
   baseHeight?: number
   /** Take the height the parent flex column leaves, instead of a fixed plot height. */
   fill?: boolean
+  /** Something to draw over the chart once it exists; re-created with it. */
+  overlay?: ((ready: KlineReady) => ReactNode) | undefined
 }): JSX.Element {
   const el = useRef<HTMLDivElement>(null)
   const chartRef = useRef<Chart | null>(null)
+  const [ready, setReady] = useState<KlineReady | null>(null)
   const latest = useRef(data)
   latest.current = data
   const paneCount = active.filter(id => CHIP_DEFS.find(d => d.id === id)?.indicator?.overlay !== true).length
@@ -454,13 +461,18 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
       open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
     })))
     chart.createIndicator({ name: 'MA', calcParams: [20, 50, 200] }, true, { id: 'candle_pane' })
-    chart.createIndicator('VOL')
+    const panes: PaneIds = {}
+    const volume = chart.createIndicator('VOL')
+    if (typeof volume === 'string') panes.volume = volume
     for (const id of active) {
       const def = CHIP_DEFS.find(d => d.id === id)
       if (def?.indicator === undefined || !hasSeries(data, def.indicator.figures)) continue
       const create = { name: def.indicator.name, extendData: seriesRows(data, def.indicator.figures) }
       if (def.indicator.overlay === true) chart.createIndicator(create, true, { id: 'candle_pane' })
-      else chart.createIndicator(create, false, { height: PANE_HEIGHT })
+      else {
+        const pane = chart.createIndicator(create, false, { height: PANE_HEIGHT })
+        if (typeof pane === 'string') panes[id] = pane
+      }
     }
     const close = data.candles[data.candles.length - 1]!.close
     const ctx: AnnotationRendererContext = { contractVersion: 1, timeframe: data.timeframe, close, palette }
@@ -502,9 +514,11 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
     }
     const observer = new ResizeObserver(() => chart.resize())
     observer.observe(container)
+    setReady({ chart, panes })
     return () => {
       observer.disconnect()
       chartRef.current = null
+      setReady(null)
       dispose(container)
     }
     // Deliberately NOT keyed on `data`: see `seriesKey`. Annotation and
@@ -528,10 +542,17 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
   // In fill mode the plot is sized by the flex parent and the ResizeObserver
   // above keeps klinecharts in step; `minHeight` is the floor below which a
   // candlestick chart stops being a chart. Indicator panes then divide the
-  // available height rather than extending the card downward.
-  return fill
-    ? <div ref={el} style={{ flex: '1 1 auto', minHeight: 240, width: '100%' }} />
-    : <div ref={el} style={{ height: baseHeight + paneCount * PANE_HEIGHT, width: '100%' }} />
+  // available height rather than extending the card downward. The chart sits
+  // in a positioned box so an overlay can lie exactly over it.
+  const box: CSSProperties = fill
+    ? { position: 'relative', flex: '1 1 auto', minHeight: 240, width: '100%' }
+    : { position: 'relative', height: baseHeight + paneCount * PANE_HEIGHT, width: '100%' }
+  return (
+    <div style={box}>
+      <div ref={el} style={{ position: 'absolute', inset: 0 }} />
+      {overlay !== undefined && ready !== null ? overlay(ready) : null}
+    </div>
+  )
 }
 
 function fmt(x: unknown): string {
@@ -598,7 +619,7 @@ function annotationRow(a: ChartAnnotation, close: number, p: Palette): { key: st
  * @param shell - container style, so the panel can drop the card's border and
  *   margins and sit flush in its column.
  */
-export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, fill = false, prose = true }: {
+export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, fill = false, prose = true, forceChips, overlay }: {
   payload: ChartPayload
   chartHeight?: number
   shell?: CSSProperties
@@ -621,13 +642,17 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
    * the plot, and the full reading is a glance to the right.
    */
   prose?: boolean
+  /** Indicator panes someone else decided on (a walkthrough section); overrides the chips. */
+  forceChips?: string[] | undefined
+  /** Drawn over the chart once it exists. */
+  overlay?: ((ready: KlineReady) => ReactNode) | undefined
 }): JSX.Element {
   const dark = useDark()
   const [activeTf, setActiveTf] = useState(0)
   const [activeChips, setActiveChips] = useState<string[]>([])
 
   const tf = payload.timeframes[Math.min(activeTf, payload.timeframes.length - 1)]
-  const activeKey = useMemo(() => [...activeChips].sort().join(','), [activeChips])
+  const activeKey = useMemo(() => [...forceChips ?? activeChips].sort().join(','), [activeChips, forceChips])
   const activeList = useMemo(() => activeKey === '' ? [] : activeKey.split(','), [activeKey])
   const scenarios = useMemo(() => payload.scenarios ?? [], [payload])
 
@@ -708,6 +733,7 @@ export function ChartBody({ payload, chartHeight = CHART_HEIGHT, shell = SHELL, 
         seriesKey={seriesKey}
         baseHeight={chartHeight}
         fill={fill}
+        overlay={overlay}
       />
       <div style={fill ? { flex: '0 1 auto', minHeight: 0, overflowY: 'auto' } : undefined}>
       {chipRow.length > 0
@@ -803,13 +829,17 @@ export function ChartCard(props: ToolCallViewProps): JSX.Element {
   const { block, toolName } = props
   const settled = 'kind' in block
   const payload = settled && !block.isError ? readChartPayload(block.meta) : null
+  // With the chart column open, the chart lives there: a full card per data
+  // read would bury the conversation under copies of it.
+  const column = useSyncExternalStore(subscribeColumn, getColumnOpen, getColumnOpen)
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     if (payload !== null) publishLatestChart(payload)
   }, [payload])
 
   if (!settled) {
-    return <div style={SHELL}>{toolName} …</div>
+    return column ? <div style={RECEIPT}>{toolName} …</div> : <div style={SHELL}>{toolName} …</div>
   }
   if (block.isError) {
     return <Fallback text={contentText(block.content) || `${toolName} failed`} error />
@@ -817,5 +847,27 @@ export function ChartCard(props: ToolCallViewProps): JSX.Element {
   if (payload === null) {
     return <Fallback text={contentText(block.content)} error={false} />
   }
+  if (column && !expanded) {
+    const tfs = payload.timeframes.map(t => t.timeframe).join(' · ')
+    const bars = payload.timeframes[0]?.candles.length ?? 0
+    const marks = payload.timeframes.reduce((n, t) => n + (t.annotations?.length ?? 0), 0)
+    return (
+      <div style={RECEIPT}>
+        <span>
+          {toolName} · {payload.symbol} {tfs} · {bars} bars{marks > 0 ? ` · ${marks} marks` : ''}
+        </span>
+        <button type="button" style={RECEIPT_BUTTON} onClick={() => setExpanded(true)}>show chart</button>
+      </div>
+    )
+  }
   return <ChartBody payload={payload} />
+}
+
+const RECEIPT: CSSProperties = {
+  display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', fontSize: 12.5, lineHeight: '20px',
+  color: 'var(--dsw-alias-text-3, #8b949e)', margin: '2px 0',
+}
+const RECEIPT_BUTTON: CSSProperties = {
+  border: 0, background: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer',
+  textDecoration: 'underline', textUnderlineOffset: 3,
 }

@@ -13,6 +13,7 @@ import type {} from '@dsh-trading/client-frame/client'
 import { ChartCard } from './ChartCard.js'
 import { ChartPanel } from './ChartPanel.js'
 import { createMarketClient } from './market-client.js'
+import { WalkthroughCard } from './WalkthroughCard.js'
 
 // The ecosystem seam: third-party dsh client plugins require
 // '@dsh-trading/client-chart/client' (mark it external in your bundle — the
@@ -27,14 +28,48 @@ export const inject = ['slots', 'connection']
 
 const CHART_TOOLS = ['market_snapshot', 'get_ohlcv', 'annotate_chart']
 
+/** The slice of `ctx.sessions` a reply needs: reach one session and send it a message. */
+interface SessionsLike {
+  scope(id: string): unknown
+  sessionOf(scope: unknown): { prompt(content: { type: 'text'; text: string }[], mode: 'queue' | 'steer'): Promise<unknown> } | undefined
+}
+
+/**
+ * Send the reader's tapped reply as their next message, exactly as if typed.
+ * Looked up at click time rather than injected at apply: a profile without
+ * the sessions service still loads this plugin, and the reply degrades to a
+ * logged warning instead of a pending plugin row.
+ */
+function sendReply(ctx: ClientContext, sessionId: string, text: string): void {
+  const sessions = ctx.get('sessions') as SessionsLike | undefined
+  const scoped = sessions?.scope(sessionId)
+  const session = scoped !== undefined ? sessions!.sessionOf(scoped) : undefined
+  if (session === undefined) {
+    console.warn('[client-chart] cannot reach the session to send a walkthrough reply')
+    return
+  }
+  void session.prompt([{ type: 'text', text }], 'queue')
+}
+
 export function apply(ctx: ClientContext): void {
   // register() throws on undeclared slots — inject() waits for dsh-client-ui-tool
   // to declare 'tool.call.toolview' and re-runs across HMR redeclarations.
-  ctx.slots.inject('tool.call.toolview', () => CHART_TOOLS.map(key =>
+  ctx.slots.inject('tool.call.toolview', () => [
+    ...CHART_TOOLS.map(key =>
+      ctx.slots.register(
+        { name: 'tool.call.toolview', key, registrant: '@dsh-trading/client-chart' },
+        ChartCard,
+      )),
     ctx.slots.register(
-      { name: 'tool.call.toolview', key, registrant: '@dsh-trading/client-chart' },
-      ChartCard,
-    )))
+      {
+        name: 'tool.call.toolview',
+        key: 'walkthrough',
+        registrant: '@dsh-trading/client-chart',
+        inject: (sessionId: string) => ({ ask: (text: string) => sendReply(ctx, sessionId, text) }),
+      },
+      WalkthroughCard,
+    ),
+  ])
 
   // The persistent column, claimed the same way: inject() means a profile
   // running dsh's stock frame (no `trading.chart` declarer) simply never runs
