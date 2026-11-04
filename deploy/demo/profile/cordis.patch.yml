@@ -1,0 +1,71 @@
+# The public TradingDraw profile.
+#
+# Layer order: dsh-base -> dsh-web-app -> @dsh-trading/bundle -> this file.
+# Only what the public demo changes is stated here: the model route, the
+# keyless market-data provider, the loopback bind, and the preset roster.
+
+# ── model route ────────────────────────────────────────────────────────────
+# One OpenAI-compatible route through OpenRouter. The key is resolved from the
+# child's environment per request and never enters this file or the browser.
+- insert:
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          opencode-go:
+            displayName: OpenCode Go
+            api: openai-completions
+            baseURL: https://opencode.ai/inference/go/openai/v1
+            apiKeyEnv: OPENCODE_API_KEY
+            # OpenCode routes by session; without this header the gateway
+            # answers 400 MissingSessionID before the model is reached.
+            headers:
+              x-opencode-session: tradingdraw-demo
+            models:
+              - id: deepseek-v4.1-flash
+                name: DeepSeek V4.1 Flash
+                contextWindow: 1000000
+                maxTokens: 16000
+
+- id: agent-default-model
+  config:
+    provider: opencode-go
+    model: deepseek-v4.1-flash
+
+# ── market data ────────────────────────────────────────────────────────────
+# Keyless Yahoo Finance candles. The bundle's CSV row is disabled and replaced
+# rather than patched inside: exactly one provider owns the seam.
+- id: market-data-provider
+  disabled: true
+
+- insert:
+    - id: market-data-public
+      name: '@dsh-trading/provider-public'
+      config:
+        id: default
+        cacheMs: 20000
+        dailyCacheMs: 300000
+
+# ── web bind ───────────────────────────────────────────────────────────────
+# Behind the gateway every request arrives as 127.0.0.1; the public authority
+# is passed by the launcher as --trusted-host. Keep the bind loopback-only.
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: !!js ctx.webStartup.port ?? 3080
+
+# ── presets ────────────────────────────────────────────────────────────────
+# The image ships exactly one preset. No coding preset is installed, so no
+# session can reach fs/bash/subagent tools even if a visitor asks for them.
+- id: agent-presets
+  config:
+    default: analyst
+
+# ── chart-first shell ──────────────────────────────────────────────────────
+# The persistent live chart column replaces the stock three-column frame.
+- id: ui-layout
+  disabled: true
+
+- insert:
+    - id: trading-frame
+      name: '@dsh-trading/client-frame'

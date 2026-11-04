@@ -1,0 +1,26 @@
+{
+  "name": "dsh-profile-dash",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/dsh-web-app": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.0-rc.6",
+    "@dsh-trading/bundle": "0.2.0",
+    "@dsh-trading/market-data": "0.2.0",
+    "@dsh-trading/provider-csv": "0.2.0",
+    "@dsh-trading/tool-market": "0.2.0",
+    "@dsh-trading/verdict": "0.2.0",
+    "@dsh-trading/risk-guard": "0.2.0",
+    "@dsh-trading/client-chart": "0.2.0",
+    "@dsh-trading/provider-public": "file:../../../artifacts/dsh-trading-provider-public.tgz",
+    "@dsh-trading/client-frame": "file:../../../artifacts/dsh-trading-client-frame.tgz"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@dsh-trading/bundle"
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tradingdraw",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  "routes": [
+    { "pattern": "tradingdraw.celineyu.me", "custom_domain": true },
+    { "pattern": "dash.celineyu.me", "custom_domain": true },
+    { "pattern": "proofline.celineyu.me", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}

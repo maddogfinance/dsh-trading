@@ -12,3 +12,6 @@ lib/
 # `render_chart` writes standalone HTML here (the bundle's `chartDir`). Agent
 # output about whatever someone happened to be analysing — not repo content.
 /charts/
+
+# deploy/demo: packed from source by build.sh, not source.
+/deploy/demo/artifacts/

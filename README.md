@@ -60,6 +60,11 @@ it before the reader sees it. The payload is §7 of [CONTRACTS.md](./CONTRACTS.m
 
 ## Demo
 
+**Live workbench: <https://tradingdraw.celineyu.me>** — a public instance with the
+keyless market feed and a capped model budget embedded, so there is nothing to
+install. `deploy/demo/` is the deployment: one dsh child per visitor behind a
+gateway, with the model key held server-side.
+
 ![The chart column is pinned to Micron while the agent's marks are for Bitcoin, so nothing lands; a pill offers them, and one click loads that chart with its six marks](media/workbench-preview.gif)
 
 The column is pinned to Micron. The agent's six marks are for Bitcoin — a
