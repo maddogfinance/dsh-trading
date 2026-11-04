@@ -15,8 +15,11 @@ WORKDIR /app
 
 # The two packages that are not on npm are packed from the checkout first.
 COPY artifacts/ /app/artifacts/
-COPY package.json /app/package.json
-RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund --legacy-peer-deps
+# The lock is committed: without it npm re-resolves the tree on every build, and
+# a minor cordis release silently broke the preset loader (see overrides in
+# package.json).
+COPY package.json package-lock.json /app/
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --legacy-peer-deps
 
 # Profile + gateway + the single preset the demo allows.
 COPY profile/ /app/dsh-home/profiles/dash/

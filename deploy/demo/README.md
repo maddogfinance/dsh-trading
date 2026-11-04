@@ -102,6 +102,18 @@ IAM grant and the redeploy in one step.
 Cloud Run env vars. The `DASH_*` prefix is internal compatibility; it is not a
 product name.
 
+## Pinned dependencies
+
+`package-lock.json` is committed and the image installs with `npm ci`. Without
+it, npm re-resolves the tree on every build and a floating minor took the demo
+down: `@deepseek-ai/cordis` 4.1.0 landed on 11/4, and dsh 0.1.0-rc.6's preset
+loader reads a `parent` field 4.1.0 no longer sets, so every `session.create`
+failed with `agent-preset-invalid` and the workspace picker could not open a
+session. `overrides` in `package.json` hold the cordis family at the versions
+the working image had (cordis 4.0.5, plugin-loader 1.0.6, hmr 1.0.20,
+plugin-group 1.0.5, plugin-include 1.0.10, plugin-timer 1.1.7, cosmokit 1.8.6,
+schemastery 3.18.5). Re-test the picker after touching any of them.
+
 ## Image patches
 
 Two upstream issues are patched at build time, both fail-loud if the upstream
