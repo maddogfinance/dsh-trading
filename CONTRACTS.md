@@ -200,7 +200,73 @@ column in `@dsh-trading/client-chart`.
 - `series` columns are keyed by bar time and drawn by time, not position, so
   they land on the right bars of a longer, live series.
 
-## 8. Deferred (design notes, not yet contracts)
+## 8. Instrument naming — one symbol, three layers
+
+The reader names an instrument in whatever form they have it: `NVDA`, `腾讯`,
+`tengxun`, `台积电`, `US.MU`, `HK.00700`. Three layers turn that into one
+symbol, and each owns a different question. Change one without the others and
+the column and the model start disagreeing about what is on screen.
+
+**Layer 1 — the column parses the message (`client-chart/src/client/symbols.ts`).**
+Pure, synchronous, no network. It answers "is there a symbol in this text?"
+and nothing else:
+
+| Kind | What it is | What the caller does |
+|---|---|---|
+| `symbol` | the text already is one (`NVDA`, `0700.HK`, `BTC-USD`, `^GSPC`, `GC=F`) | load it as written |
+| `text` | a run of Chinese, ≤ 10 characters (`腾讯`) | ask the provider; it owns the name table |
+| `query` | a lower-case Latin word (`tesla`) | ask the provider, then accept only an exact ticker or a name that is that company |
+
+Broker notation is rewritten on the way out (`US.MU` → `MU`, `HK.00700` →
+`0700.HK`, `SH.600519` → `600519.SS`), because a chart that refuses `US.MU`
+reads as broken rather than mistranslated. `NOT_TICKERS` is the other half of
+this layer: `RSI`, `MACD`, `BUY`, `NOW` and friends are vocabulary, not
+instruments, and a request is full of them.
+
+Candidates come back in the order the reader wrote them, and the panel takes the
+first that resolves — `先看 NVDA 再看 腾讯` opens NVDA.
+
+**Layer 2 — the provider resolves names (`provider-public.search`).**
+`MarketDataProvider.search` is optional; a provider without it answers nothing
+and callers fall back to "type the exact ticker". `provider-public` answers in
+this order:
+
+1. the catalogue's own symbols and names (`NVDA`, `apple`);
+2. a name table carrying Chinese, pinyin and English spellings
+   (`腾讯` / `tengxun` / `tencent` → `0700.HK`);
+3. the same table by containment, longest name first, so `腾讯怎么样` is about
+   腾讯 and `贵州茅台` is not answered as 茅台. Latin names need a word
+   boundary, or `gold` fires inside `goldman`;
+4. Yahoo's search endpoint, for everything else.
+
+A resolved name keeps the reader's own word, not the catalogue's display name:
+callers match a lookup back against what was asked, and `Bitcoin / US Dollar`
+is not what anyone typed.
+
+The name table lives here and only here. The client used to keep a second copy,
+which drifted; the column now forwards the name instead.
+
+**Layer 3 — the model confirms (`resolve_symbol`, tool-market).**
+Same lookup, exposed as a tool. The persona requires it before reading any data
+when the reader names an instrument in words, so the model cannot guess a ticker
+and then describe the wrong company's bars. It is also what makes a lookup the
+model can cite, rather than an assumption.
+
+**What the column does with the answer.** Naming an instrument moves the column
+immediately, before the model has said anything. Two rules keep that honest:
+
+- Only messages that were *just* said count (60s), so opening a page onto old
+  history does not yank the chart.
+- Once the reader has named an instrument, only that instrument may move the
+  column until the agent charts it. A turn still running keeps charting the
+  symbol it started on, and without this the old analysis drags the column back.
+
+A message sent while a turn is running is not history yet: it waits in the
+session's inbox (`queue`) until the agent admits it. The panel reads both the
+inbox and the conversation nodes, or the second ticker of a session is invisible
+to it.
+
+## 9. Deferred (design notes, not yet contracts)
 
 - **Watch/alert**: a `kind:'watch'` payload naming price-cross conditions is
   the sketch; evaluation source, close-vs-tick semantics, delivery
