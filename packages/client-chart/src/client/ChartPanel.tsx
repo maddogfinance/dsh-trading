@@ -141,8 +141,16 @@ interface SessionNode {
   content?: readonly { type: string; text?: string }[]
 }
 
+/** One message waiting in the session's inbox. */
+interface QueuedMessage {
+  messageId: string
+  text?: string | null
+}
+
 /** The session hook the framework binds for `session-maybe` slots: undefined with no session. */
-type SessionHook = <S>(sel: (s: { running: boolean; nodes: readonly SessionNode[] }) => S) => S | undefined
+type SessionHook = <S>(
+  sel: (s: { running: boolean; nodes: readonly SessionNode[]; queue: readonly QueuedMessage[] }) => S,
+) => S | undefined
 
 /** Plain text of one user message. */
 function messageText(node: SessionNode): string {
@@ -193,8 +201,19 @@ export function ChartPanel(
   const fails = useRef(0)
   const failedFollow = useRef<string | null>(null)
   const ownOrigin = useRef<'user' | 'followed'>('user')
-  /** The last user message this panel has already acted on. */
-  const sniffed = useRef<number | null>(null)
+  /** The last message text this panel has already acted on. */
+  const sniffed = useRef<string | null>(null)
+  /**
+   * The instrument the reader named most recently, until the conversation
+   * agrees with it.
+   *
+   * A turn that is still running keeps charting the instrument it started on:
+   * without this, asking about a second ticker mid-answer moves the column for
+   * a second and the old analysis drags it back. Only the named symbol may
+   * move the column until the agent charts that same symbol, after which the
+   * conversation has the wheel again.
+   */
+  const readerTarget = useRef<string | null>(null)
 
   // Adopt whatever the agent last DREW, separately from what it last fetched.
   // Keyed on content, not identity: `latest` republishes the same payload
@@ -304,6 +323,11 @@ export function ChartPanel(
       },
     )
     if (decision.action !== 'load') return
+    const wanted = readerTarget.current
+    if (wanted !== null) {
+      if (!sameSymbol(wanted, decision.symbol)) return
+      readerTarget.current = null
+    }
     if (failedFollow.current === `${decision.symbol}|${decision.timeframe}`) return
 
     clearTimeout(followTimer.current)
@@ -322,6 +346,11 @@ export function ChartPanel(
   useEffect(() => {
     if (board === null || width === 0) return
     if (ownSeries !== null && sameSymbol(ownSeries, boardSeries!)) return
+    const wanted = readerTarget.current
+    if (wanted !== null) {
+      if (!sameSymbol(wanted, board.symbol)) return
+      readerTarget.current = null
+    }
     if (failedFollow.current === boardSeries) return
     setTimeframe(board.timeframe)
     void load(board.symbol, board.timeframe, 'follow')
@@ -336,45 +365,71 @@ export function ChartPanel(
   // enough that a reader who asks about a second ticker concludes the column
   // is stuck. This is the fast half; when the analyst charts something else a
   // moment later, its payload wins and the guess is forgotten.
-  const lastAsked = useSession?.(state => {
+  //
+  // Two sources, because a message sent while a turn is still running is not
+  // history yet: it sits in the session's inbox (`queue`) until the agent
+  // admits it. Reading only the conversation nodes meant the second ticker of a
+  // session — the one sent mid-answer — was never seen at all.
+  const asked = useSession?.(state => {
+    const queued = state.queue.length > 0 ? state.queue[state.queue.length - 1] : undefined
+    const queuedText = queued?.text?.trim() ?? ''
+    if (queued !== undefined && queuedText !== '') return `q\u0000${queued.messageId}\u0000${queuedText}`
     for (let i = state.nodes.length - 1; i >= 0; i -= 1) {
       const node = state.nodes[i]
-      if (node?.kind === 'user') return node
+      // `steering` is a message the reader sent while a turn was still running.
+      if (node?.kind === 'user' || node?.kind === 'steering') {
+        return `n\u0000${node.seq}\u0000${node.time}\u0000${messageText(node)}`
+      }
     }
-    return undefined
+    return ''
   })
   useEffect(() => {
-    if (lastAsked === undefined || width === 0) return
-    if (sniffed.current !== null && lastAsked.seq <= sniffed.current) return
-    sniffed.current = lastAsked.seq
+    if (asked === undefined || asked === '' || width === 0) return
+    const [source, stamp, ...rest] = asked.split('\u0000')
+    const text = rest.join('\u0000')
+    if (text.trim() === '' || sniffed.current === text) return
+    sniffed.current = text
     // Only what is said now counts. Opening a page onto an existing
     // conversation must not yank the chart to whatever was last typed there an
-    // hour ago, and a replay after a reload is history by the same rule.
-    if (Date.now() - lastAsked.time > SNIFF_FRESH_MS) return
-    const candidates = readSymbolCandidates(messageText(lastAsked))
-    const first = candidates[0]
-    if (first === undefined) return
+    // hour ago, and a replay after a reload is history by the same rule. A
+    // queued message has no timestamp because it has not been recorded yet.
+    if (source === 'n' && Date.now() - Number(stamp) > SNIFF_FRESH_MS) return
+    const candidates = readSymbolCandidates(text)
+    if (candidates.length === 0) return
     // Naming a different instrument outranks a walkthrough that is still
     // talking: the reader has moved on, and the old section would otherwise
     // keep dragging the column back to the chart it was told on.
     if (talk.board !== null) lesson.dismiss()
     setPinned(false)
-    if (first.kind === 'symbol') {
-      void load(first.value, timeframe, 'follow')
-      return
-    }
     void (async () => {
-      try {
-        const hits = await market.search(first.value)
-        const hit = hits.find(item => isSameInstrument(first.value, item))
-        if (hit !== undefined) void load(hit.symbol, timeframe, 'follow')
-      } catch {
-        // A failed guess is not the reader's problem: the analyst's own chart
-        // call will arrive shortly and land the column where it belongs.
+      // The first name that resolves wins: "先看 NVDA 再看 腾讯" opens NVDA,
+      // which is the order the reader said them in.
+      for (const candidate of candidates) {
+        if (candidate.kind === 'symbol') {
+          readerTarget.current = candidate.value
+          void load(candidate.value, timeframe, 'follow')
+          return
+        }
+        try {
+          const hits = await market.search(candidate.value)
+          // A name is the provider's call; a lower-case Latin word has to prove
+          // it is that company, or "buy now" would open BUY.
+          const hit = candidate.kind === 'text'
+            ? hits[0]
+            : hits.find(item => isSameInstrument(candidate.value, item))
+          if (hit !== undefined) {
+            readerTarget.current = hit.symbol
+            void load(hit.symbol, timeframe, 'follow')
+            return
+          }
+        } catch {
+          // A failed guess is not the reader's problem: the analyst's own chart
+          // call will arrive shortly and land the column where it belongs.
+        }
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastAsked?.seq, width, market, load])
+  }, [asked, width, market, load])
 
   // Tell the chat cards whether the chart lives here, so a data read collapses to one line.
   useEffect(() => {

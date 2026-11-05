@@ -153,6 +153,29 @@ const NAME_ALIASES: Record<string, string> = {
   以太币: 'ETH-USD', 索拉纳: 'SOL-USD', 黄金: 'GC=F', 原油: 'CL=F', 白银: 'SI=F',
   纳指: '^IXIC', 纳斯达克: '^IXIC', 标普500: '^GSPC', 标普: '^GSPC', 道指: '^DJI',
   道琼斯: '^DJI', 恒生: '^HSI', 恒指: '^HSI', 沪深300: '000300.SS', 上证: '000001.SS',
+
+  // Pinyin: what a reader types on a phone without switching to Chinese.
+  tengxun: '0700.HK', tencent: '0700.HK', ali: 'BABA', alibaba: 'BABA', maotai: '600519.SS',
+  guizhoumaotai: '600519.SS', ningdeshidai: '300750.SZ', biyadi: '002594.SZ', byd: '002594.SZ',
+  zhaoshangyinhang: '3968.HK', gongshangyinhang: '1398.HK', zhongguopingan: '2318.HK',
+  pingan: '2318.HK', zhongxinguoji: '0981.HK', zhongxin: '0981.HK', xiaomi: '1810.HK',
+  meituan: '3690.HK', jingdong: 'JD', pinduoduo: 'PDD', baidu: 'BIDU', wangyi: 'NTES',
+  kuaishou: '1024.HK', haidilao: '6862.HK', nongfushanquan: '9633.HK', gangjiaosuo: '0388.HK',
+  huifeng: '0005.HK', youbang: '1299.HK', zhongguoyidong: '0941.HK', weilai: 'NIO',
+  nio: 'NIO', lixiang: 'LI', xiaopeng: 'XPEV', taijidian: 'TSM', tsmc: 'TSM',
+  yingweida: 'NVDA', nvidia: 'NVDA', tesila: 'TSLA', tesla: 'TSLA', pingguo: 'AAPL',
+  apple: 'AAPL', weiruan: 'MSFT', microsoft: 'MSFT', gegu: 'GOOGL', google: 'GOOGL',
+  yamaxun: 'AMZN', amazon: 'AMZN', lianshu: 'META', meta: 'META', botong: 'AVGO',
+  meiguang: 'MU', yingteer: 'INTC', intel: 'INTC', chaowei: 'AMD', amd: 'AMD',
+  jiaguwen: 'ORCL', oracle: 'ORCL', naifei: 'NFLX', netflix: 'NFLX', dishini: 'DIS',
+  disney: 'DIS', boyin: 'BA', boeing: 'BA', woerma: 'WMT', walmart: 'WMT',
+  koukeokele: 'KO', mocheng: 'JPM', gaosheng: 'GS', bokeerxier: 'BRK-B',
+  bitebi: 'BTC-USD', bitcoin: 'BTC-USD', yitaifang: 'ETH-USD', ethereum: 'ETH-USD',
+  suolana: 'SOL-USD', solana: 'SOL-USD', huangjin: 'GC=F', gold: 'GC=F',
+  yuanyou: 'CL=F', oil: 'CL=F', baiyin: 'SI=F', silver: 'SI=F',
+  nazhi: '^IXIC', nasdaq: '^IXIC', biaopu: '^GSPC', sandp: '^GSPC', 's&p': '^GSPC',
+  daozhi: '^DJI', dow: '^DJI', hengsheng: '^HSI', hangseng: '^HSI',
+  hushen300: '000300.SS', csi300: '000300.SS', shangzheng: '000001.SS',
 }
 
 /** Quote types the chart endpoint can actually serve. */
@@ -208,7 +231,7 @@ class PublicProvider implements MarketDataProvider {
       item.symbol.toUpperCase() === raw.toUpperCase()
       || (item.name ?? '').toLowerCase() === raw.toLowerCase())
     if (direct !== undefined) return direct
-    const aliased = NAME_ALIASES[raw]
+    const aliased = NAME_ALIASES[raw] ?? this.byContainment(raw)
     const broker = /^(US|HK|SH|SZ)\.([A-Za-z0-9.]+)$/.exec(raw)
     let symbol = aliased
     if (symbol === undefined && broker !== null) {
@@ -223,9 +246,16 @@ class PublicProvider implements MarketDataProvider {
             : `${code.padStart(6, '0')}.SZ`
     }
     if (symbol === undefined) return undefined
+    // The reader's own word stays the name: the catalogue's display name
+    // ("Bitcoin / US Dollar") describes the instrument but is not what they
+    // typed, and callers match a lookup back against what was asked.
     const catalogued = CATALOGUE.find(item => item.symbol.toUpperCase() === symbol!.toUpperCase())
-    if (catalogued !== undefined) return catalogued
-    return { symbol, name: raw, assetClass: 'equity', timeframes: TIMEFRAMES }
+    return {
+      symbol,
+      name: raw,
+      assetClass: catalogued?.assetClass ?? 'equity',
+      timeframes: TIMEFRAMES,
+    }
   }
 
   constructor(config: Config) {
@@ -250,6 +280,32 @@ class PublicProvider implements MarketDataProvider {
    * directly; Chinese ones need the caller's alias table, because Yahoo's index
    * answers `nvidia` but not `英伟达`.
    */
+  /**
+   * Find a name inside a sentence — `腾讯怎么样` is a question about 腾讯.
+   *
+   * Longest match wins, so `贵州茅台` is not answered as 茅台 and `阿里巴巴` not
+   * as 阿里. Latin names must sit on a word boundary, or `gold` would fire
+   * inside `goldman`.
+   * @param raw - the reader's text, already trimmed.
+   * @returns the instrument the text names, when it names one.
+   */
+  private byContainment(raw: string): string | undefined {
+    const text = raw.toLowerCase()
+    let best: { name: string; symbol: string } | undefined
+    for (const [name, symbol] of Object.entries(NAME_ALIASES)) {
+      const key = name.toLowerCase()
+      if (!text.includes(key)) continue
+      if (/^[a-z]/.test(key)) {
+        const at = text.indexOf(key)
+        const before = at === 0 ? '' : text[at - 1] ?? ''
+        const after = text[at + key.length] ?? ''
+        if (/[a-z0-9]/.test(before) || /[a-z0-9]/.test(after)) continue
+      }
+      if (best === undefined || name.length > best.name.length) best = { name, symbol }
+    }
+    return best?.symbol
+  }
+
   async search(query: string): Promise<InstrumentInfo[]> {
     const q = query.trim()
     if (q === '') return []

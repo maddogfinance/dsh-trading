@@ -47,6 +47,30 @@ describe('search', () => {
     expect((await provider.search?.('SH.600519'))?.[0]?.symbol).toBe('600519.SS')
   })
 
+  it('answers pinyin and English spellings of the same listing', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const provider = mount()
+    expect((await provider.search?.('tengxun'))?.[0]?.symbol).toBe('0700.HK')
+    expect((await provider.search?.('tencent'))?.[0]?.symbol).toBe('0700.HK')
+    expect((await provider.search?.('taijidian'))?.[0]?.symbol).toBe('TSM')
+    expect((await provider.search?.('maotai'))?.[0]?.symbol).toBe('600519.SS')
+    expect((await provider.search?.('bitcoin'))?.[0]?.symbol).toBe('BTC-USD')
+  })
+
+  it('finds a name inside a sentence, longest name first', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const provider = mount()
+    expect((await provider.search?.('腾讯怎么样'))?.[0]?.symbol).toBe('0700.HK')
+    expect((await provider.search?.('看看贵州茅台'))?.[0]?.symbol).toBe('600519.SS')
+    expect((await provider.search?.('what about bitcoin today'))?.[0]?.symbol).toBe('BTC-USD')
+  })
+
+  it('does not fire a Latin name inside another word', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ quotes: [] }))))
+    // "gold" must not be found inside "goldman".
+    expect(await mount().search?.('goldman sachs upgrade')).toEqual([])
+  })
+
   it('finds a catalogued symbol by its own name', async () => {
     vi.stubGlobal('fetch', vi.fn())
     expect((await mount().search?.('NVDA'))?.[0]?.symbol).toBe('NVDA')
@@ -64,12 +88,12 @@ describe('search', () => {
   it('reads Yahoo results for a name the table does not know', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       quotes: [
-        { symbol: 'TSM', shortname: 'Taiwan Semiconductor', quoteType: 'EQUITY' },
-        { symbol: 'TSM34.SA', shortname: 'TAIWANSMFAC DRN', quoteType: 'EQUITY' },
+        { symbol: 'ASML', shortname: 'ASML Holding', quoteType: 'EQUITY' },
+        { symbol: 'ASML34.SA', shortname: 'ASML HOLDING DRN', quoteType: 'EQUITY' },
         { symbol: 'NOTHING', quoteType: 'MUTUALFUND_ODD' },
       ],
     }))))
-    const hits = await mount().search?.('tsmc')
-    expect(hits?.map(h => h.symbol)).toEqual(['TSM', 'TSM34.SA'])
+    const hits = await mount().search?.('asml')
+    expect(hits?.map(h => h.symbol)).toEqual(['ASML', 'ASML34.SA'])
   })
 })

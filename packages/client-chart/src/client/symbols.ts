@@ -7,12 +7,14 @@
  * nothing more. It never decides an analysis, and a wrong guess costs a chart
  * the model is about to correct anyway.
  *
- * Two kinds of answer, because they need different confidence:
- * - `symbol` — the text already IS a symbol (`NVDA`, `0700.HK`, `BTC-USD`), or a
- *   name whose ticker is not in doubt (`腾讯`, `茅台`). Load it straight away.
+ * Three kinds of answer, because they need different confidence:
+ * - `symbol` — the text already IS a symbol (`NVDA`, `0700.HK`, `BTC-USD`).
+ *   Load it straight away.
+ * - `text` — a Chinese name (`腾讯`), left to the provider's table, which also
+ *   carries pinyin and English spellings.
  * - `query` — a short lower-case word that might be a company (`tesla`, `tsmc`).
- *   The caller resolves it and accepts only an exact ticker or a name match,
- *   which is what keeps `buy` and `see` from opening a chart.
+ *   The caller accepts only an exact ticker or a name match, which is what
+ *   keeps `buy` and `see` from opening a chart.
  * @module
  */
 
@@ -20,88 +22,12 @@
 export interface SymbolCandidate {
   /** The symbol itself, or the text to resolve through the provider's search. */
   value: string
-  kind: 'symbol' | 'query'
-}
-
-/**
- * Chinese and English names for instruments this demo is likely to be asked
- * about, mapped to the symbol the public feed can chart.
- *
- * Yahoo's search answers `nvidia` and `0700.HK` but not `英伟达`, so the mapping
- * cannot live there. This is a demo-sized table on purpose: a name that is not
- * here still reaches the model, which resolves it itself — the table only buys
- * the first two seconds of feedback.
- */
-const ALIASES: Record<string, string> = {
-  腾讯: '0700.HK',
-  阿里巴巴: 'BABA',
-  阿里: 'BABA',
-  贵州茅台: '600519.SS',
-  茅台: '600519.SS',
-  宁德时代: '300750.SZ',
-  比亚迪: '002594.SZ',
-  招商银行: '3968.HK',
-  工商银行: '1398.HK',
-  中国平安: '2318.HK',
-  平安: '2318.HK',
-  中芯国际: '0981.HK',
-  中芯: '0981.HK',
-  小米: '1810.HK',
-  美团: '3690.HK',
-  京东: 'JD',
-  拼多多: 'PDD',
-  百度: 'BIDU',
-  网易: 'NTES',
-  快手: '1024.HK',
-  海底捞: '6862.HK',
-  农夫山泉: '9633.HK',
-  港交所: '0388.HK',
-  香港交易所: '0388.HK',
-  汇丰: '0005.HK',
-  友邦: '1299.HK',
-  中国移动: '0941.HK',
-  蔚来: 'NIO',
-  理想汽车: 'LI',
-  小鹏汽车: 'XPEV',
-  台积电: 'TSM',
-  英伟达: 'NVDA',
-  特斯拉: 'TSLA',
-  苹果: 'AAPL',
-  微软: 'MSFT',
-  谷歌: 'GOOGL',
-  亚马逊: 'AMZN',
-  脸书: 'META',
-  博通: 'AVGO',
-  美光: 'MU',
-  英特尔: 'INTC',
-  超微: 'AMD',
-  甲骨文: 'ORCL',
-  奈飞: 'NFLX',
-  迪士尼: 'DIS',
-  波音: 'BA',
-  沃尔玛: 'WMT',
-  可口可乐: 'KO',
-  摩根大通: 'JPM',
-  高盛: 'GS',
-  伯克希尔: 'BRK-B',
-  比特币: 'BTC-USD',
-  大饼: 'BTC-USD',
-  以太坊: 'ETH-USD',
-  以太币: 'ETH-USD',
-  索拉纳: 'SOL-USD',
-  黄金: 'GC=F',
-  原油: 'CL=F',
-  白银: 'SI=F',
-  纳指: '^IXIC',
-  纳斯达克: '^IXIC',
-  标普500: '^GSPC',
-  标普: '^GSPC',
-  道指: '^DJI',
-  道琼斯: '^DJI',
-  恒生: '^HSI',
-  恒指: '^HSI',
-  沪深300: '000300.SS',
-  上证: '000001.SS',
+  /**
+   * `symbol` — load it as written. `query` — a Latin word the caller must
+   * verify is that company. `text` — a name (Chinese, pinyin, English) the
+   * provider's own table decides.
+   */
+  kind: 'symbol' | 'query' | 'text'
 }
 
 /**
@@ -171,7 +97,7 @@ export function normaliseBrokerSymbol(symbol: string): string {
 }
 
 /** A token that is already a symbol: `NVDA`, `0700.HK`, `BTC-USD`, `^GSPC`, `GC=F`. */
-const SYMBOL_PATTERN = /(?<![A-Za-z0-9])(\$?(?:[A-Z]{2,6}=[XF]|\^?[A-Z][A-Z0-9]{0,5}(?:[.-][A-Z0-9]{1,6})?))(?![A-Za-z0-9])/g
+const SYMBOL_PATTERN = /(?<![A-Za-z0-9.])(\$?(?:[A-Z]{2,6}=[XF]|\^?[A-Z][A-Z0-9]{0,5}(?:[.-][A-Z0-9]{1,6})?))(?![A-Za-z0-9])/g
 
 /** A Hong Kong / mainland listing: `0700.HK`, `600519.SS`, `300750.SZ`. */
 const NUMBERED_PATTERN = /(?<![A-Za-z0-9])(\d{4,6}\.(?:HK|SS|SZ|TW|T))(?![A-Za-z0-9])/gi
@@ -179,21 +105,22 @@ const NUMBERED_PATTERN = /(?<![A-Za-z0-9])(\d{4,6}\.(?:HK|SS|SZ|TW|T))(?![A-Za-z
 /** A short lower-case word worth resolving: `tesla`, `tsmc`, `nvda`. */
 const WORD_PATTERN = /(?<![A-Za-z0-9])([a-z]{3,8})(?![A-Za-z0-9])/g
 
+/** A run of Chinese: a company name to look up, not a ticker to trust. */
+const CJK_PATTERN = /[\u4e00-\u9fff]{2,}/g
+
+/** Longer than this and the run is a sentence, not a name. */
+const CJK_NAME_MAX = 10
+
 /**
  * Read the instruments one message might be about, best first.
  *
- * Aliases are matched on the raw text (they are unambiguous), then explicit
- * symbols, then lower-case words left for the caller to verify.
+ * Explicit symbols are read here; names — Chinese, pinyin or English — are
+ * handed to the provider, which owns the table, so the two can never drift.
  * @param text - the reader's message, as typed.
  * @returns candidates in the order they appear; empty when nothing looks like an instrument.
  */
 export function readSymbolCandidates(text: string): SymbolCandidate[] {
   const found: { at: number; candidate: SymbolCandidate }[] = []
-
-  for (const [alias, symbol] of Object.entries(ALIASES)) {
-    const at = text.indexOf(alias)
-    if (at >= 0) found.push({ at, candidate: { value: symbol, kind: 'symbol' } })
-  }
 
   for (const match of text.matchAll(NUMBERED_PATTERN)) {
     const token = match[1]
@@ -208,6 +135,15 @@ export function readSymbolCandidates(text: string): SymbolCandidate[] {
     // A single letter is a pronoun, not a listing.
     if (token.length < 2) continue
     found.push({ at: match.index, candidate: { value: normaliseBrokerSymbol(token), kind: 'symbol' } })
+  }
+
+  for (const match of text.matchAll(CJK_PATTERN)) {
+    const run = match[0]
+    // A long run is a sentence ("直接告诉我两个关键价位"), not a company name;
+    // sending it to the provider would cost a lookup to learn nothing.
+    if (run !== undefined && run.length <= CJK_NAME_MAX) {
+      found.push({ at: match.index, candidate: { value: run, kind: 'text' } })
+    }
   }
 
   for (const match of text.matchAll(WORD_PATTERN)) {

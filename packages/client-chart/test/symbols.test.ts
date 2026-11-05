@@ -2,49 +2,54 @@ import { describe, expect, it } from 'vitest'
 import { isSameInstrument, normaliseBrokerSymbol, readSymbolCandidates } from '../src/client/symbols.js'
 
 const values = (text: string) => readSymbolCandidates(text).map(c => `${c.kind}:${c.value}`)
+const symbols = (text: string) => readSymbolCandidates(text).filter(c => c.kind === 'symbol').map(c => c.value)
 
 describe('readSymbolCandidates', () => {
   it('reads an explicit ticker', () => {
-    expect(values('我想看看 AAPL')).toEqual(['symbol:AAPL'])
+    expect(symbols('我想看看 AAPL')).toEqual(['AAPL'])
   })
 
-  it('reads a Chinese name through the alias table', () => {
-    expect(values('腾讯怎么样')).toEqual(['symbol:0700.HK'])
-  })
-
-  it('collapses two aliases that mean the same listing', () => {
-    expect(values('贵州茅台')).toEqual(['symbol:600519.SS'])
+  it('hands a Chinese name to the provider instead of guessing a ticker', () => {
+    expect(values('腾讯怎么样')).toEqual(['text:腾讯怎么样'])
   })
 
   it('reads exchange suffixes, crypto pairs, indices and futures', () => {
-    expect(values('0700.HK 怎么样')).toContain('symbol:0700.HK')
-    expect(values('BTC-USD 现在')).toContain('symbol:BTC-USD')
-    expect(values('看看 ^GSPC')).toContain('symbol:^GSPC')
-    expect(values('原油 GC=F')).toContain('symbol:GC=F')
-    expect(values('600519.SS')).toContain('symbol:600519.SS')
+    expect(symbols('0700.HK 怎么样')).toEqual(['0700.HK'])
+    expect(symbols('BTC-USD 现在')).toEqual(['BTC-USD'])
+    expect(symbols('看看 ^GSPC')).toEqual(['^GSPC'])
+    expect(symbols('原油 GC=F')).toEqual(['GC=F'])
+    expect(symbols('600519.SS')).toEqual(['600519.SS'])
   })
 
   it('leaves a lower-case word for the caller to verify', () => {
-    expect(values('看看 tesla')).toEqual(['query:tesla'])
+    expect(values('看看 tesla')).toEqual(['text:看看', 'query:tesla'])
   })
 
-  it('ignores indicator vocabulary and ordinary English', () => {
-    expect(values('RSI 和 MACD 怎么看')).toEqual([])
-    expect(values('buy now or wait')).toEqual([])
-    expect(values('show me the trend please')).toEqual([])
+  it('emits no ticker for indicator vocabulary or ordinary English', () => {
+    expect(symbols('RSI 和 MACD 怎么看')).toEqual([])
+    expect(symbols('buy now or wait')).toEqual([])
+    expect(symbols('show me the trend please')).toEqual([])
   })
 
-  it('keeps the order the reader wrote them in', () => {
-    expect(values('先看 NVDA 再看 腾讯')).toEqual(['symbol:NVDA', 'symbol:0700.HK'])
-    expect(values('先看 腾讯 再看 NVDA')).toEqual(['symbol:0700.HK', 'symbol:NVDA'])
+  it('keeps the reader order between a ticker and a name', () => {
+    // The panel walks this list in order, so the first name that resolves is
+    // the one the reader said first.
+    expect(values('先看 NVDA 再看 腾讯')).toEqual(['text:先看', 'symbol:NVDA', 'text:再看', 'text:腾讯'])
+    expect(values('先看 腾讯 再看 NVDA')).toEqual(['text:先看', 'text:腾讯', 'text:再看', 'symbol:NVDA'])
+  })
+
+  it('drops a sentence-length run of Chinese', () => {
+    expect(values('别绕了，直接告诉我两个关键价位')).toEqual(['text:别绕了'])
   })
 
   it('dedupes the same instrument named twice', () => {
-    expect(values('AAPL，还是 AAPL')).toEqual(['symbol:AAPL'])
+    expect(symbols('AAPL，还是 AAPL')).toEqual(['AAPL'])
   })
 
-  it('finds nothing in a message about nothing', () => {
-    expect(values('你看一下左边这个')).toEqual([])
+  it('finds no ticker in a message about nothing', () => {
+    // A Chinese sentence still reaches the provider as a name to try; what it
+    // must never produce is a ticker the panel would load blind.
+    expect(symbols('你看一下左边这个')).toEqual([])
     expect(values('')).toEqual([])
   })
 })
@@ -59,8 +64,8 @@ describe('normaliseBrokerSymbol', () => {
   })
 
   it('reads a broker code in a message', () => {
-    expect(values('看看 US.MU')).toEqual(['symbol:MU'])
-    expect(values('HK.00700 怎么样')).toEqual(['symbol:0700.HK'])
+    expect(symbols('看看 US.MU')).toEqual(['MU'])
+    expect(symbols('HK.00700 怎么样')).toEqual(['0700.HK'])
   })
 })
 
