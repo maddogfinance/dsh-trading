@@ -131,6 +131,59 @@ interface YahooChart {
   }
 }
 
+/**
+ * Names people actually use, mapped to symbols this feed serves.
+ *
+ * Two reasons this is not left to Yahoo: its index does not answer Chinese
+ * names (`英伟达`, `腾讯`), and its search endpoint answers 429 when a demo
+ * leans on it. Both are common enough that a lookup which only ever reached
+ * Yahoo would look broken.
+ */
+const NAME_ALIASES: Record<string, string> = {
+  腾讯: '0700.HK', 阿里巴巴: 'BABA', 阿里: 'BABA', 贵州茅台: '600519.SS', 茅台: '600519.SS',
+  宁德时代: '300750.SZ', 比亚迪: '002594.SZ', 招商银行: '3968.HK', 工商银行: '1398.HK',
+  中国平安: '2318.HK', 平安: '2318.HK', 中芯国际: '0981.HK', 中芯: '0981.HK', 小米: '1810.HK',
+  美团: '3690.HK', 京东: 'JD', 拼多多: 'PDD', 百度: 'BIDU', 网易: 'NTES', 快手: '1024.HK',
+  海底捞: '6862.HK', 农夫山泉: '9633.HK', 港交所: '0388.HK', 汇丰: '0005.HK', 友邦: '1299.HK',
+  中国移动: '0941.HK', 蔚来: 'NIO', 理想汽车: 'LI', 小鹏汽车: 'XPEV', 台积电: 'TSM',
+  英伟达: 'NVDA', 特斯拉: 'TSLA', 苹果: 'AAPL', 微软: 'MSFT', 谷歌: 'GOOGL', 亚马逊: 'AMZN',
+  脸书: 'META', 博通: 'AVGO', 美光: 'MU', 英特尔: 'INTC', 超微: 'AMD', 甲骨文: 'ORCL',
+  奈飞: 'NFLX', 迪士尼: 'DIS', 波音: 'BA', 沃尔玛: 'WMT', 可口可乐: 'KO', 摩根大通: 'JPM',
+  高盛: 'GS', 伯克希尔: 'BRK-B', 比特币: 'BTC-USD', 大饼: 'BTC-USD', 以太坊: 'ETH-USD',
+  以太币: 'ETH-USD', 索拉纳: 'SOL-USD', 黄金: 'GC=F', 原油: 'CL=F', 白银: 'SI=F',
+  纳指: '^IXIC', 纳斯达克: '^IXIC', 标普500: '^GSPC', 标普: '^GSPC', 道指: '^DJI',
+  道琼斯: '^DJI', 恒生: '^HSI', 恒指: '^HSI', 沪深300: '000300.SS', 上证: '000001.SS',
+}
+
+/** Quote types the chart endpoint can actually serve. */
+const ASSET_CLASS: Record<string, string> = {
+  EQUITY: 'equity',
+  ETF: 'etf',
+  INDEX: 'index',
+  CRYPTOCURRENCY: 'crypto',
+  CURRENCY: 'fx',
+  FUTURE: 'future',
+  MUTUALFUND: 'fund',
+}
+
+/** How long one search answer is reused; names do not change by the minute. */
+const SEARCH_CACHE_MS = 60_000
+
+/** How long to stop asking Yahoo after it answers 429. */
+const SEARCH_COOLDOWN_MS = 60_000
+
+/** Yahoo answers a bare fetch with a consent page; a browser UA keeps it JSON. */
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+
+interface YahooSearch {
+  quotes?: {
+    symbol?: string
+    shortname?: string
+    longname?: string
+    quoteType?: string
+  }[]
+}
+
 class PublicProvider implements MarketDataProvider {
   readonly id: string
   readonly description: string
@@ -138,6 +191,42 @@ class PublicProvider implements MarketDataProvider {
   private readonly cacheMs: number
   private readonly dailyCacheMs: number
   private readonly cache = new Map<string, { at: number; candles: Candle[] }>()
+  private readonly searchCache = new Map<string, { at: number; items: InstrumentInfo[] }>()
+  /** Set after Yahoo rate-limits us, so a burst does not become a stampede. */
+  private searchBlockedUntil = 0
+
+  /**
+   * Look one name up in the local table, including broker notation
+   * (`US.MU` → `MU`) and the catalogue itself.
+   * @param query - what the reader called it.
+   * @returns the instrument, when the table knows it.
+   */
+  private byName(query: string): InstrumentInfo | undefined {
+    const raw = query.trim()
+    // The catalogue answers its own symbols and names: `NVDA`, `apple`.
+    const direct = CATALOGUE.find(item =>
+      item.symbol.toUpperCase() === raw.toUpperCase()
+      || (item.name ?? '').toLowerCase() === raw.toLowerCase())
+    if (direct !== undefined) return direct
+    const aliased = NAME_ALIASES[raw]
+    const broker = /^(US|HK|SH|SZ)\.([A-Za-z0-9.]+)$/.exec(raw)
+    let symbol = aliased
+    if (symbol === undefined && broker !== null) {
+      const market = broker[1] as string
+      const code = (broker[2] as string).replace(/^0+(?=\d)/, '')
+      symbol = market === 'US'
+        ? (broker[2] as string).toUpperCase()
+        : market === 'HK'
+          ? `${code.padStart(4, '0')}.HK`
+          : market === 'SH'
+            ? `${code.padStart(6, '0')}.SS`
+            : `${code.padStart(6, '0')}.SZ`
+    }
+    if (symbol === undefined) return undefined
+    const catalogued = CATALOGUE.find(item => item.symbol.toUpperCase() === symbol!.toUpperCase())
+    if (catalogued !== undefined) return catalogued
+    return { symbol, name: raw, assetClass: 'equity', timeframes: TIMEFRAMES }
+  }
 
   constructor(config: Config) {
     this.id = config.id
@@ -150,6 +239,63 @@ class PublicProvider implements MarketDataProvider {
 
   async listSymbols(): Promise<InstrumentInfo[]> {
     return CATALOGUE
+  }
+
+  /**
+   * Resolve free text to chartable instruments through Yahoo's search endpoint.
+   *
+   * This is the keyless counterpart of `list_symbols`: the catalogue above is
+   * sixteen well-known names, and a reader who asks about "台积电" or "0700.HK"
+   * should not have to guess which of them is close enough. Latin queries work
+   * directly; Chinese ones need the caller's alias table, because Yahoo's index
+   * answers `nvidia` but not `英伟达`.
+   */
+  async search(query: string): Promise<InstrumentInfo[]> {
+    const q = query.trim()
+    if (q === '') return []
+    const known = this.byName(q)
+    if (known !== undefined) return [known]
+    const hit = this.searchCache.get(q)
+    if (hit !== undefined && Date.now() - hit.at < SEARCH_CACHE_MS) return hit.items
+    const url = `${this.baseURL}/v1/finance/search?q=${encodeURIComponent(q)}`
+      + '&quotesCount=8&newsCount=0&listsCount=0&enableFuzzyQuery=false'
+    // A 429 is Yahoo saying "not now", not the reader naming something that
+    // does not exist. Answer with no matches and let the caller ask for the
+    // ticker, instead of failing a tool call the model cannot act on.
+    if (Date.now() < this.searchBlockedUntil) return []
+    let response: Response
+    try {
+      response = await fetch(url, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } })
+    } catch {
+      return []
+    }
+    if (response.status === 429) {
+      this.searchBlockedUntil = Date.now() + SEARCH_COOLDOWN_MS
+      return []
+    }
+    if (!response.ok) throw new Error(`yahoo search ${response.status} for '${q}'`)
+    const body = await response.json() as YahooSearch
+    const items: InstrumentInfo[] = []
+    for (const quote of body.quotes ?? []) {
+      const symbol = quote.symbol
+      if (typeof symbol !== 'string' || symbol === '') continue
+      const assetClass = ASSET_CLASS[quote.quoteType ?? '']
+      if (assetClass === undefined) continue
+      items.push({
+        symbol,
+        ...quote.shortname !== undefined && quote.shortname !== ''
+          ? { name: quote.shortname }
+          : quote.longname !== undefined && quote.longname !== ''
+            ? { name: quote.longname }
+            : {},
+        assetClass,
+        timeframes: TIMEFRAMES,
+      })
+      if (items.length === 8) break
+    }
+    this.searchCache.set(q, { at: Date.now(), items })
+    if (this.searchCache.size > 100) this.searchCache.delete(this.searchCache.keys().next().value as string)
+    return items
   }
 
   async getOhlcv(query: OhlcvQuery): Promise<Candle[]> {

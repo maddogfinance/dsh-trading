@@ -37,6 +37,11 @@ export interface PanelInstrument {
 /** What the panel needs from the host; the whole surface the UI may touch. */
 export interface MarketClient {
   listSymbols(signal?: AbortSignal): Promise<{ providerId: string; description: string; symbols: PanelInstrument[] }>
+  /**
+   * Resolve free text — a name, a half-remembered ticker, a Chinese company —
+   * to instruments the provider can chart. Empty when it found nothing.
+   */
+  search(query: string, signal?: AbortSignal): Promise<PanelInstrument[]>
   getPayload(symbol: string, timeframe: string, signal?: AbortSignal): Promise<ChartPayload>
   /** The last few bars only — what a live refresh needs, without refetching the series. */
   getTail(symbol: string, timeframe: string, bars: number, signal?: AbortSignal): Promise<Candle[]>
@@ -377,6 +382,13 @@ export function createMarketClient(rpc: RpcCaller): MarketClient {
         symbols: PanelInstrument[]
       }
       return value
+    },
+
+    async search(query, signal) {
+      const value = await unwrap(rpc.call(CHANNEL, 'search', { query }, signal)) as {
+        items: PanelInstrument[]
+      }
+      return value.items
     },
 
     async getPayload(symbol, timeframe, signal) {

@@ -120,6 +120,61 @@ export function apply(ctx: Context, config: Config): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'resolve_symbol',
+    description: 'Resolve an instrument name, a Chinese company name or a broker-style code (US.MU, HK.00700) to the exact symbol this market feed can chart. Call this when the reader names an instrument in words instead of the provider symbol — never guess a ticker and then report data for the wrong company.',
+    parameters: {
+      query: { type: 'string', required: true, description: 'What the reader called it: "腾讯", "台积电", "tesla", "US.MU", "700 HK".' },
+      provider: { type: 'string', description: 'Provider id to search. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          provider: { type: 'string', required: true },
+          query: { type: 'string', required: true },
+          matches: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                symbol: { type: 'string', required: true },
+                name: { type: 'string' },
+                assetClass: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.matches.length === 0
+          ? `No instrument matched '${value.query}'. Ask the reader for the exact ticker, or list_symbols for the catalogue.`
+          : value.matches
+            .map(m => `${m.symbol}${m.name !== undefined ? ` — ${m.name}` : ''}${m.assetClass !== undefined ? ` (${m.assetClass})` : ''}`)
+            .join('\n'),
+      }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const matches = provider.search === undefined ? [] : await provider.search(args.query)
+      return {
+        provider: provider.id,
+        query: args.query,
+        matches: matches.slice(0, 8).map(m => ({
+          symbol: m.symbol,
+          ...m.name !== undefined ? { name: m.name } : {},
+          ...m.assetClass !== undefined ? { assetClass: m.assetClass } : {},
+        })),
+      }
+    },
+    presentCall: args => ({ card: 'generic', title: `Resolve ${args.query}`, kind: 'read', rawInput: args }),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'get_ohlcv',
     description: 'Fetch OHLCV candles for one symbol and timeframe as CSV, optionally with SMA/RSI indicator columns. Times are ISO-8601 UTC bar-open times, ascending. Use list_symbols first if the symbol universe is unknown.',
     parameters: {

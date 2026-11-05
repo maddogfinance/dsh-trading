@@ -30,7 +30,7 @@ import type { Candle, InstrumentInfo, MarketDataProvider, Timeframe } from '@dsh
 export const MARKET_CHANNEL = '/dsh-trading-market'
 
 /** Channel-relative endpoints. */
-export const ENDPOINTS = { symbols: 'symbols', ohlcv: 'ohlcv', view: 'view' } as const
+export const ENDPOINTS = { symbols: 'symbols', ohlcv: 'ohlcv', view: 'view', search: 'search' } as const
 
 /** Bars a single panel request may pull; a chart cannot show more than this usefully. */
 export const MAX_PANEL_BARS = 1000
@@ -84,6 +84,13 @@ export interface SymbolsResponse {
   providerId: string
   description: string
   symbols: InstrumentInfo[]
+}
+
+/** What a name lookup resolved to. */
+export interface SearchResponse {
+  providerId: string
+  query: string
+  items: InstrumentInfo[]
 }
 
 /** The panel's view of a candle series. */
@@ -201,6 +208,22 @@ export interface MarketDataLike {
 }
 
 /**
+ * Validate a `search` request. Same rule as `ohlcv`: nothing unchecked from the
+ * browser reaches a provider, and this text goes on to become a URL query.
+ * @param payload - the decoded body.
+ * @returns the trimmed query, or a message naming what was wrong.
+ */
+export function readSearchRequest(payload: unknown): { query: string } | string {
+  if (typeof payload !== 'object' || payload === null) return 'request must be an object'
+  const q = (payload as Record<string, unknown>)['query']
+  if (typeof q !== 'string') return 'query must be a string'
+  const trimmed = q.trim()
+  if (trimmed === '') return 'query must not be empty'
+  if (trimmed.length > 64) return 'query is implausibly long'
+  return { query: trimmed }
+}
+
+/**
  * Serve one decoded endpoint against the market-data hub.
  * @param marketData - the hub (or a fake with the same two members).
  * @param endpoint - channel-relative endpoint.
@@ -214,7 +237,7 @@ export async function serveMarketEndpoint(
   endpoint: string,
   payload: unknown,
   onView?: (view: ChartView) => void,
-): Promise<SymbolsResponse | OhlcvResponse | { ok: true }> {
+): Promise<SymbolsResponse | OhlcvResponse | SearchResponse | { ok: true }> {
   if (endpoint === ENDPOINTS.view) {
     const view = readChartView(payload)
     if (typeof view === 'string') throw new Error(view)
@@ -229,6 +252,14 @@ export async function serveMarketEndpoint(
     if (id !== undefined && typeof id !== 'string') throw new Error('providerId must be a string')
     const provider = marketData.provider(id)
     return { providerId: provider.id, description: provider.description, symbols: await provider.listSymbols() }
+  }
+
+  if (endpoint === ENDPOINTS.search) {
+    const request = readSearchRequest(payload)
+    if (typeof request === 'string') throw new Error(request)
+    const provider = marketData.provider()
+    const items = provider.search === undefined ? [] : await provider.search(request.query)
+    return { providerId: provider.id, query: request.query, items }
   }
 
   if (endpoint === ENDPOINTS.ohlcv) {

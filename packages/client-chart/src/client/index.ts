@@ -88,7 +88,10 @@ export function apply(ctx: ClientContext): void {
       {
         name: 'trading.chart',
         registrant: '@dsh-trading/client-chart',
-        inject: () => ({ market }),
+        inject: (sessionId?: string) => ({
+          market,
+          ask: sessionId === undefined ? undefined : (text: string) => sendReply(ctx, sessionId, text),
+        }),
       },
       ChartPanel,
     ),

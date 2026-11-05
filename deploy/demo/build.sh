@@ -27,5 +27,32 @@ cp "$ROOT/packages/client-chart/dsh-trading-client-chart-0.2.0.tgz" "$HERE/artif
 cp "$ROOT/packages/client-frame/dsh-trading-client-frame-0.2.0.tgz" "$HERE/artifacts/dsh-trading-client-frame.tgz"
 rm -f "$ROOT/packages/provider-public"/*.tgz "$ROOT/packages/tool-market"/*.tgz "$ROOT/packages/client-chart"/*.tgz "$ROOT/packages/client-frame"/*.tgz
 
+# The lock records an integrity hash for each packed tarball. Repacking one
+# changes its bytes, and npm then installs the copy it has cached under the OLD
+# hash: the image silently keeps the previous build while every step reports
+# success. Rewrite the four hashes from the bytes on disk, so the cache misses
+# and npm reads the tarball in this build context.
+echo "== refreshing the lock's local tarball hashes"
+python3 - "$HERE" <<'PY'
+import base64, hashlib, json, sys
+here = sys.argv[1]
+path = f"{here}/package-lock.json"
+with open(path, encoding="utf-8") as fh:
+    lock = json.load(fh)
+changed = 0
+for key, entry in lock.get("packages", {}).items():
+    resolved = entry.get("resolved", "")
+    if not resolved.startswith("file:artifacts/"):
+        continue
+    with open(f"{here}/{resolved[len('file:'):]}", "rb") as fh:
+        digest = base64.b64encode(hashlib.sha512(fh.read()).digest()).decode()
+    entry["integrity"] = f"sha512-{digest}"
+    changed += 1
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(lock, fh, indent=2)
+    fh.write("\n")
+print(f"   {changed} local tarball hashes updated")
+PY
+
 echo "== docker build ($TAG)"
 docker build --network host -t "$TAG" "$HERE"

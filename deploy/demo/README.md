@@ -21,7 +21,7 @@ browser ──TLS──> Cloudflare Worker ──shared header──> Cloud Run 
 |---|---|---|
 | Model | `@deepseek-ai/dsh-llm-pi-ai` → OpenCode Go, `deepseek-v4.1-flash` | `OPENCODE_API_KEY`, Cloud Run secret only |
 | Market data | `@dsh-trading/provider-public` → Yahoo Finance chart endpoint | none |
-| Analysis tools | `@dsh-trading/tool-market`, incl. `walkthrough` (built from this checkout) | none |
+| Analysis tools | `@dsh-trading/tool-market`, incl. `walkthrough` and `resolve_symbol` (built from this checkout) | none |
 | Chart UI | `@dsh-trading/client-chart` (built from this checkout) | none |
 | Shell | `@dsh-trading/client-frame` (built from this checkout) | none |
 
@@ -102,9 +102,28 @@ IAM grant and the redeploy in one step.
 Cloud Run env vars. The `DASH_*` prefix is internal compatibility; it is not a
 product name.
 
+## Naming the instrument
+
+The reader names an instrument in whatever form they have it: `NVDA`, `腾讯`,
+`台积电`, `US.MU`, `HK.00700`. Three layers turn that into a symbol:
+
+- the chart column parses the message as it is sent (tickers, Chinese names from
+  a local table, broker notation) and moves to it immediately, before the model
+  has answered;
+- `resolve_symbol` gives the model the same lookup, so it confirms the ticker
+  instead of guessing one and then describing the wrong company's bars;
+- `provider-public` answers Chinese names and broker notation from its own
+  table, and only then asks Yahoo's search endpoint — which does not index
+  Chinese names and answers 429 when leaned on.
+
 ## Pinned dependencies
 
-`package-lock.json` is committed and the image installs with `npm ci`. Without
+`package-lock.json` is committed and the image installs with `npm ci`. The four
+`@dsh-trading` packages are packed from this checkout on every build, and the
+lock holds an integrity hash for each — so `build.sh` rewrites those four hashes
+from the bytes it just packed. Skip that and `npm ci` installs the copy it has
+cached under the old hash: the image keeps the previous build while every step
+reports success. Without
 it, npm re-resolves the tree on every build and a floating minor took the demo
 down: `@deepseek-ai/cordis` 4.1.0 landed on 11/4, and dsh 0.1.0-rc.6's preset
 loader reads a `parent` field 4.1.0 no longer sets, so every `session.create`
