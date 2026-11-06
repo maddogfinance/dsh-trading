@@ -1,0 +1,48 @@
+{
+  "name": "@dsh-trading/provider-public",
+  "version": "0.2.0",
+  "description": "Keyless public candles from Yahoo Finance behind the @dsh-trading/market-data seam — equities, ETFs, indices, FX, futures and crypto pairs on one endpoint",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh-trading/market-data": "workspace:^",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maddogfinance/dsh-trading.git",
+    "directory": "packages/provider-public"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "trading",
+    "market-data",
+    "yahoo-finance",
+    "technical-analysis"
+  ]
+}

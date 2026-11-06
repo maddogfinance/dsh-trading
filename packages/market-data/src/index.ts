@@ -84,6 +84,16 @@ export class MarketData extends Service {
   listSymbols(providerId?: string): Promise<InstrumentInfo[]> {
     return this.provider(providerId).listSymbols()
   }
+
+  /**
+   * Convenience: resolve free text to instruments through the resolved
+   * provider. A provider without search answers with nothing rather than
+   * throwing, so a caller can offer "type the exact symbol" instead.
+   */
+  search(query: string, providerId?: string): Promise<InstrumentInfo[]> {
+    const provider = this.provider(providerId)
+    return provider.search === undefined ? Promise.resolve([]) : provider.search(query)
+  }
 }
 
 export namespace MarketData {

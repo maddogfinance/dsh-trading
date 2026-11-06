@@ -39,7 +39,30 @@ text belongs. And the loop closes: the panel publishes what it is showing back
 to the host, so the agent can read your chart (`get_chart_view`, plus a
 one-line context injection each turn) instead of asking you to screenshot it.
 
+### The walkthrough
+
+The Market Analyst does not hand you a report. It talks you through the chart
+the way an analyst sitting beside you would: the answer first, then one piece
+of evidence at a time, pointing as it goes. Each section is one `walkthrough`
+call. In the chat its lines arrive one at a time, at reading pace; on the
+column, each line moves the chart: the section's timeframe and window, a pen
+circle around the bar it names, a highlighter over the zone that decides it, a
+lime pointer on whatever is being talked about. Click any earlier line and the
+chart goes back to that moment. Drag the chart and the analyst stops and waits
+for you. When it ends a turn on a question, the replies it offers send a real
+message.
+
+Every mark is pinned to a bar (`{ time, field }`) and the tool reads the value
+off the data, so the analyst cannot circle a number the bar never printed; a
+level can cite a checkable source ("the lowest low since 9/11"). A wrong
+number fails the call with the bar where it really occurs, and the model fixes
+it before the reader sees it. The payload is §7 of [CONTRACTS.md](./CONTRACTS.md).
+
 ## Demo
+
+**Live workbench: <https://tradingdraw.celineyu.me>** — a public instance with the
+keyless market feed and a capped model budget embedded, so there is nothing to
+install. The deployment itself is kept private.
 
 ![The chart column is pinned to Micron while the agent's marks are for Bitcoin, so nothing lands; a pill offers them, and one click loads that chart with its six marks](media/workbench-preview.gif)
 
@@ -81,7 +104,8 @@ Eight packages, one direction of dependency:
 
 ```
 @dsh-trading/tool-market      model-facing tools (list_symbols, get_ohlcv,
-                              market_snapshot, annotate_chart, render_chart)
+                              market_snapshot, walkthrough, annotate_chart,
+                              render_chart)
                               + the indicator library
         │  consumes
         ▼
@@ -303,6 +327,7 @@ pnpm test
 - [x] `annotate_chart`: model-authored levels/zones/paths with mandatory provenance and a hard price-range gate, plus base/alternative scenarios — rendered on the card with a levels table
 - [x] Open contracts for ecosystem builders ([CONTRACTS.md](./CONTRACTS.md)): chart payload, open annotation envelope, pure-renderer registry
 - [x] Chart-first shell (`@dsh-trading/client-frame`) and a persistent live column the user drives, with the agent's drawings landing on it
+- [x] The walkthrough: analysis told a line at a time on the reader's chart, every mark anchored to a bar and checked
 - [ ] Chart panel deepening: user-drawing feedback to the agent, `@Remote` host service for pan-back data
 - [ ] Watch/alert contract (notify-only), `@dsh-trading/contracts` package, conformance fixtures
 - [ ] Research-journal session events (hypotheses, signals — replayable)

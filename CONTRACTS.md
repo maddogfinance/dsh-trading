@@ -146,7 +146,127 @@ Additive-only within version 1; readers MUST ignore unknown fields.
   shadow returns and reports self-reported vs shadow as the fill-model gap,
   so optimistic intrabar pricing surfaces instead of scoring.
 
-## 7. Deferred (design notes, not yet contracts)
+## 7. Walkthrough payload — `kind: 'walkthrough'`, `version: 1`
+
+One section of an analysis told to the reader on their chart: a few spoken
+lines, each moving the chart. Produced by `walkthrough`
+(`@dsh-trading/tool-market`, resolver in `src/walkthrough.ts`), carried on the
+tool result's `meta` like §2, consumed by the walkthrough card and the chart
+column in `@dsh-trading/client-chart`.
+
+```jsonc
+{
+  "kind": "walkthrough", "version": 1,
+  "provider": "public", "symbol": "AAPL", "timeframe": "1d", "section": "双顶",
+  "window": { "from": 1791293400000, "to": 1793629800000 },   // bar open times, ms (2026-10-06 → 2026-11-02)
+  "pane": "stoch",                                              // optional: rsi|stoch|adx|macd|mfi
+  "series": { "t": [/* ms */], "cols": { "stoch_k": [/* … */], "stoch_d": [/* … */] } },
+  "marks": [
+    { "id": "p1", "type": "circle", "surface": "price", "tone": "neutral", "at": { "t": 1792762200000, "v": 351.73 } },
+    { "id": "zone", "type": "zone", "surface": "price", "tone": "neutral", "low": 334.35, "high": 337, "keep": true },
+    { "id": "up", "type": "arrow", "surface": "price", "tone": "up", "points": [{ "t": 1793629800000, "v": 338.32 }, { "ahead": 10, "v": 348 }] }
+  ],
+  "lines": [
+    { "say": "[[p1|10/23]] 冲到 351.73，没站住。", "draw": ["p1"], "point": "p1" },
+    { "say": "回到我们一开始说的[[zone|那一段]]。", "focus": "zone", "point": "zone", "volume": [1793629800000] }
+  ],
+  "ask": ["好，你说"],
+  "close": 338.32
+}
+```
+
+- **Anchored, not asserted.** The model names a bar and a field (`{ time,
+  field }`); the producer reads the value off the bars and writes the
+  resolved `{ t, v }`. A value the model states is checked, and a mismatch
+  fails the call with the bar where that value does occur. A level may cite a
+  checkable `source` (`{ field, time }`, or `{ field, stat: 'min'|'max',
+  from, to }`); without one it needs a free-text `why`. Indicator values are
+  computed over the same 300-bar window as `market_snapshot`, so they match
+  what the model read.
+- **Marks** are `circle` (a bar value), `level`, `zone`, `path`/`arrow`
+  (through bars, then optional `ahead` projections), and `span` (a time
+  range). `surface` says which pane: `price`, `volume`, or `indicator` (the
+  section's `pane`). `keep` leaves a mark faintly on the chart through later
+  sections of the same instrument; `focus` on a later line re-lights any
+  earlier mark by id.
+- **Lines** are text the client renders as text, never HTML. Two inline
+  tokens exist: `[[markId|words]]` ties words to a mark (hovering them lights
+  it), `**words**` is bold; anything else is literal.
+- **Pacing is the reader's, not the producer's.** A section that lands live
+  is spoken a line at a time and queues behind the one before it; a section
+  from history shows settled. `ask` offers 1–3 replies once every line is
+  said, and the turn ends there; a tapped reply is sent as the reader's own
+  message.
+- `series` columns are keyed by bar time and drawn by time, not position, so
+  they land on the right bars of a longer, live series.
+
+## 8. Instrument naming — one symbol, three layers
+
+The reader names an instrument in whatever form they have it: `NVDA`, `腾讯`,
+`tengxun`, `台积电`, `US.MU`, `HK.00700`. Three layers turn that into one
+symbol, and each owns a different question. Change one without the others and
+the column and the model start disagreeing about what is on screen.
+
+**Layer 1 — the column parses the message (`client-chart/src/client/symbols.ts`).**
+Pure, synchronous, no network. It answers "is there a symbol in this text?"
+and nothing else:
+
+| Kind | What it is | What the caller does |
+|---|---|---|
+| `symbol` | the text already is one (`NVDA`, `0700.HK`, `BTC-USD`, `^GSPC`, `GC=F`) | load it as written |
+| `text` | a run of Chinese, ≤ 10 characters (`腾讯`) | ask the provider; it owns the name table |
+| `query` | a lower-case Latin word (`tesla`) | ask the provider, then accept only an exact ticker or a name that is that company |
+
+Broker notation is rewritten on the way out (`US.MU` → `MU`, `HK.00700` →
+`0700.HK`, `SH.600519` → `600519.SS`), because a chart that refuses `US.MU`
+reads as broken rather than mistranslated. `NOT_TICKERS` is the other half of
+this layer: `RSI`, `MACD`, `BUY`, `NOW` and friends are vocabulary, not
+instruments, and a request is full of them.
+
+Candidates come back in the order the reader wrote them, and the panel takes the
+first that resolves — `先看 NVDA 再看 腾讯` opens NVDA.
+
+**Layer 2 — the provider resolves names (`provider-public.search`).**
+`MarketDataProvider.search` is optional; a provider without it answers nothing
+and callers fall back to "type the exact ticker". `provider-public` answers in
+this order:
+
+1. the catalogue's own symbols and names (`NVDA`, `apple`);
+2. a name table carrying Chinese, pinyin and English spellings
+   (`腾讯` / `tengxun` / `tencent` → `0700.HK`);
+3. the same table by containment, longest name first, so `腾讯怎么样` is about
+   腾讯 and `贵州茅台` is not answered as 茅台. Latin names need a word
+   boundary, or `gold` fires inside `goldman`;
+4. Yahoo's search endpoint, for everything else.
+
+A resolved name keeps the reader's own word, not the catalogue's display name:
+callers match a lookup back against what was asked, and `Bitcoin / US Dollar`
+is not what anyone typed.
+
+The name table lives here and only here. The client used to keep a second copy,
+which drifted; the column now forwards the name instead.
+
+**Layer 3 — the model confirms (`resolve_symbol`, tool-market).**
+Same lookup, exposed as a tool. The persona requires it before reading any data
+when the reader names an instrument in words, so the model cannot guess a ticker
+and then describe the wrong company's bars. It is also what makes a lookup the
+model can cite, rather than an assumption.
+
+**What the column does with the answer.** Naming an instrument moves the column
+immediately, before the model has said anything. Two rules keep that honest:
+
+- Only messages that were *just* said count (60s), so opening a page onto old
+  history does not yank the chart.
+- Once the reader has named an instrument, only that instrument may move the
+  column until the agent charts it. A turn still running keeps charting the
+  symbol it started on, and without this the old analysis drags the column back.
+
+A message sent while a turn is running is not history yet: it waits in the
+session's inbox (`queue`) until the agent admits it. The panel reads both the
+inbox and the conversation nodes, or the second ticker of a session is invisible
+to it.
+
+## 9. Deferred (design notes, not yet contracts)
 
 - **Watch/alert**: a `kind:'watch'` payload naming price-cross conditions is
   the sketch; evaluation source, close-vs-tick semantics, delivery
