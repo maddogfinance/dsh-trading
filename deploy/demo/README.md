@@ -34,7 +34,7 @@ cache, fails loud on a missing series rather than serving a stale one.
 
 The API key never reaches the browser:
 
-- The key is a Cloud Run **secret**, injected as `OPENROUTER_API_KEY` into the
+- The key is a Cloud Run **secret**, injected as `OPENCODE_API_KEY` into the
   gateway and inherited by each child. It is absent from the image, the Worker,
   the HTML and every client bundle (verified by grepping the deployed assets for
   the key prefix).
@@ -69,15 +69,15 @@ The API key never reaches the browser:
 
 ## Rebuild and deploy
 
-Prerequisites: Docker, `gcloud` authenticated to `project-d3a45b0b-ed4d-4268-ad8`,
-`wrangler` logged in to the Cloudflare account that owns `celineyu.me`.
+Prerequisites: Docker, `gcloud` authenticated to the target project, and
+`wrangler` logged in to the Cloudflare account that owns the domain.
 
 ```sh
 cd deploy/demo
 ./build.sh                 # build packages, pack tarballs, build image
 # then:
 docker tag dash-trading:local \
-  asia-east2-docker.pkg.dev/project-d3a45b0b-ed4d-4268-ad8/quantdata/dash-trading:$(date +%Y%m%d-%H%M)
+  asia-east2-docker.pkg.dev/$PROJECT/quantdata/tradingdraw:$(date +%Y%m%d-%H%M)
 docker push ...
 gcloud run deploy dash-trading --image=... --region=asia-east2
 ```
@@ -96,6 +96,10 @@ cd worker && wrangler secret put DASH_GATEWAY_TOKEN
 
 `switch-to-opencode.sh` does the local env-file write, the secret rotation, the
 IAM grant and the redeploy in one step.
+
+The Worker takes the origin as a deploy var:
+`wrangler deploy --var DASH_ORIGIN:https://<service>-<hash>.<region>.run.app`
+(the repo carries no project id or run.app URL).
 
 `DASH_PUBLIC_HOST` (now `tradingdraw.celineyu.me`), `DASH_MAX_CHILDREN`,
 `DASH_VISITOR_PROMPTS`, `DASH_IP_PROMPTS` and `DASH_DAILY_PROMPTS` are ordinary

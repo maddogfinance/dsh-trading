@@ -2,15 +2,17 @@
 # Move the public demo from OpenRouter to an OpenCode Go key.
 #
 # The key is written to this machine's env file first (the same 0600 file that
-# already holds OPENROUTER_API_KEY), then to Secret Manager, then bound to the
+# already holds the model key), then to Secret Manager, then bound to the
 # Cloud Run service. Nothing is printed back.
 #
 # Usage:  ./switch-to-opencode.sh          (prompts, input hidden)
 #         ./switch-to-opencode.sh <token>  (token in argv: avoid, it lands in history)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${ENV_FILE:-/home/celine/denoise-lab/Quant/.env}"
-PROJECT="${PROJECT:-project-d3a45b0b-ed4d-4268-ad8}"
+# Where the local copy of the key lives. Defaults to a per-user config file;
+# set ENV_FILE to reuse an existing env file.
+ENV_FILE="${ENV_FILE:-$HOME/.config/tradingdraw/opencode.env}"
+PROJECT="${PROJECT:?set PROJECT to the GCP project id}"
 REGION="${REGION:-asia-east2}"
 SERVICE="${SERVICE:-dash-trading}"
 SECRET="${SECRET:-tradingdraw-opencode-key}"
@@ -47,6 +49,7 @@ fi
 rm -f /tmp/opencode-token-check.json
 
 echo "== storing in $ENV_FILE"
+mkdir -p "$(dirname "$ENV_FILE")"
 python3 - "$ENV_FILE" "$TOKEN" <<'PY'
 import os, sys
 path, token = sys.argv[1], sys.argv[2]

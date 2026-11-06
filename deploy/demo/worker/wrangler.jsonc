@@ -3,6 +3,9 @@
   "name": "tradingdraw",
   "main": "src/index.js",
   "compatibility_date": "2026-07-01",
+  // Set this to the Cloud Run service URL at deploy time:
+  //   wrangler deploy --var DASH_ORIGIN:https://<service>-<hash>.<region>.run.app
+  "vars": { "DASH_ORIGIN": "" },
   "routes": [
     { "pattern": "tradingdraw.celineyu.me", "custom_domain": true },
     { "pattern": "dash.celineyu.me", "custom_domain": true },

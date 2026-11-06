@@ -8,8 +8,6 @@
  * WebSockets are tunnelled explicitly: the workbench's event stream is a
  * WebSocket, and a plain `return fetch(request)` does not relay frames.
  */
-const ORIGIN = 'https://dash-trading-300981674127.asia-east2.run.app'
-
 function withGateway(headers, env) {
   const next = new Headers(headers)
   next.set('x-dash-gateway', env.DASH_GATEWAY_TOKEN)
@@ -20,9 +18,9 @@ function withGateway(headers, env) {
   return next
 }
 
-async function proxyWebSocket(request, env) {
+async function proxyWebSocket(request, env, origin) {
   const url = new URL(request.url)
-  const upstream = await fetch(new URL(url.pathname + url.search, ORIGIN), {
+  const upstream = await fetch(new URL(url.pathname + url.search, origin), {
     headers: withGateway(request.headers, env),
   })
   const socket = upstream.webSocket
@@ -66,16 +64,20 @@ async function proxyWebSocket(request, env) {
 
 export default {
   async fetch(request, env) {
+    const origin = env.DASH_ORIGIN
+    if (typeof origin !== 'string' || !origin.startsWith('https://')) {
+      return new Response('DASH_ORIGIN is not configured for this Worker', { status: 500 })
+    }
     const incoming = new URL(request.url)
     // The old name was a transcription slip; keep every shared link working.
     if (incoming.hostname === 'dash.celineyu.me' || incoming.hostname === 'proofline.celineyu.me') {
       return Response.redirect(`https://tradingdraw.celineyu.me${incoming.pathname}${incoming.search}`, 301)
     }
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return proxyWebSocket(request, env)
+      return proxyWebSocket(request, env, origin)
     }
     const url = incoming
-    const upstream = new Request(new URL(url.pathname + url.search, ORIGIN), {
+    const upstream = new Request(new URL(url.pathname + url.search, origin), {
       method: request.method,
       headers: withGateway(request.headers, env),
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
