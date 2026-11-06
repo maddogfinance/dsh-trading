@@ -19,12 +19,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import type { ChartOwnerProps } from '@dsh-trading/client-frame/client'
-import { ChartBody } from './ChartCard.js'
-import { getLatestChart, subscribeLatestChart } from './latest.js'
+import { ChartBody, useDark } from './ChartCard.js'
+import { getLatestChart, setColumnOpen, subscribeLatestChart } from './latest.js'
 import { decideFollow } from './follow.js'
-import { mergeMarks, mergeTail, readMarks, recallMarks, rememberMarks, withCandles } from './market-client.js'
+import { getLessonSnapshot, lesson, subscribeLesson } from './lesson.js'
+import { LessonLayer } from './LessonLayer.js'
+import { mergeMarks, mergeTail, readMarks, recallMarks, rememberMarks, withCandles, withLessonSeries } from './market-client.js'
 import type { ChartMarks, MarketClient } from './market-client.js'
 import type { ChartPayload } from './payload.js'
+import { isSameInstrument, readSymbolCandidates } from './symbols.js'
 
 /** Timeframes the panel offers; the provider may serve a subset and will say so. */
 const TIMEFRAMES = ['15m', '30m', '1h', '4h', '1d', '1w'] as const
@@ -106,6 +109,12 @@ const TF_BUTTON = (on: boolean): CSSProperties => ({
   fontWeight: on ? 600 : 400,
 })
 
+/** How recently a message must have been said for the panel to act on it. */
+const SNIFF_FRESH_MS = 60_000
+
+/** Case- and space-insensitive instrument identity. */
+const sameSymbol = (a: string, b: string): boolean => a.trim().toUpperCase() === b.trim().toUpperCase()
+
 const NOTE: CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center', justifyContent: 'center',
   height: '100%', padding: '0 24px', textAlign: 'center', fontSize: 13,
@@ -115,6 +124,40 @@ const NOTE: CSSProperties = {
 /** What the plugin's inject face hands this component. */
 export interface ChartPanelInject {
   market: MarketClient
+  /**
+   * Send the reader's request to the analyst as their next message. Absent in
+   * a profile without the sessions service, in which case the panel simply
+   * offers no button.
+   */
+  ask?: ((text: string) => void) | undefined
+}
+
+/** The slice of a session node this panel reads. */
+interface SessionNode {
+  kind: string
+  seq: number
+  /** Unix epoch ms from the session event. */
+  time: number
+  content?: readonly { type: string; text?: string }[]
+}
+
+/** One message waiting in the session's inbox. */
+interface QueuedMessage {
+  messageId: string
+  text?: string | null
+}
+
+/** The session hook the framework binds for `session-maybe` slots: undefined with no session. */
+type SessionHook = <S>(
+  sel: (s: { running: boolean; nodes: readonly SessionNode[]; queue: readonly QueuedMessage[] }) => S,
+) => S | undefined
+
+/** Plain text of one user message. */
+function messageText(node: SessionNode): string {
+  return (node.content ?? [])
+    .filter(block => block.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text as string)
+    .join(' ')
 }
 
 /**
@@ -126,8 +169,15 @@ export interface ChartPanelInject {
  * @param market - the host-backed data client.
  * @returns the chart, or an invitation to name a symbol.
  */
-export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject): JSX.Element | null {
+export function ChartPanel(
+  props: ChartOwnerProps & ChartPanelInject & { sessionId?: string | undefined; useSession?: SessionHook | undefined },
+): JSX.Element | null {
+  const { width, market, ask, useSession } = props
   const fromAgent = useSyncExternalStore(subscribeLatestChart, getLatestChart, getLatestChart)
+  // The analyst's walkthrough, when one is on: what to show for the line being said.
+  const talk = useSyncExternalStore(subscribeLesson, getLessonSnapshot, getLessonSnapshot)
+  const board = talk.board
+  const dark = useDark()
 
   const [draft, setDraft] = useState('')
   const [timeframe, setTimeframe] = useState<string>('1d')
@@ -151,6 +201,19 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   const fails = useRef(0)
   const failedFollow = useRef<string | null>(null)
   const ownOrigin = useRef<'user' | 'followed'>('user')
+  /** The last message text this panel has already acted on. */
+  const sniffed = useRef<string | null>(null)
+  /**
+   * The instrument the reader named most recently, until the conversation
+   * agrees with it.
+   *
+   * A turn that is still running keeps charting the instrument it started on:
+   * without this, asking about a second ticker mid-answer moves the column for
+   * a second and the old analysis drags it back. Only the named symbol may
+   * move the column until the agent charts that same symbol, after which the
+   * conversation has the wheel again.
+   */
+  const readerTarget = useRef<string | null>(null)
 
   // Adopt whatever the agent last DREW, separately from what it last fetched.
   // Keyed on content, not identity: `latest` republishes the same payload
@@ -171,17 +234,28 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     })
   }, [fromAgent])
 
+  // A walkthrough draws on the column only once the column holds the very
+  // series the section was told on; until then it is loading that series.
+  const lessonOn = board !== null && own !== null && own.provider === board.provider
+    && sameSymbol(own.symbol, board.symbol) && own.timeframes[0]?.timeframe === board.timeframe
+  const lessonPayload = useMemo(
+    () => lessonOn && own !== null ? withLessonSeries(own, board?.series) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lessonOn, own, board?.series],
+  )
+
   const active = marks !== null && marks.key !== dismissed ? marks : null
+  // annotate_chart's marks stand down while the analyst is talking: one voice on the chart at a time.
   const merged = useMemo(
-    () => own !== null && active !== null ? mergeMarks(own, active) : null,
-    [own, active],
+    () => own !== null && active !== null && !lessonOn ? mergeMarks(own, active) : null,
+    [own, active, lessonOn],
   )
 
   // The panel's own lookup takes precedence: an agent answer arriving mid-read
   // must not replace what the user deliberately put on screen. Its DRAWINGS
   // are welcome on top of it, which is what `merged` carries; when they are
   // about a different chart, mergeMarks hands the payload straight back.
-  const payload = merged?.payload ?? own ?? fromAgent
+  const payload = lessonPayload ?? merged?.payload ?? own ?? fromAgent
 
   const load = useCallback(async (symbol: string, tf: string, trigger: 'user' | 'follow' = 'user') => {
     inflight.current?.abort()
@@ -234,7 +308,10 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   //
   // Debounced because an analysis can call annotate_chart dozens of times in
   // one turn; only the settled target is worth a fetch.
+  const talking = board !== null
   useEffect(() => {
+    // A walkthrough decides what is on the column while it is on.
+    if (talking) return
     const decision = decideFollow(
       fromAgent === null
         ? null
@@ -246,6 +323,11 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
       },
     )
     if (decision.action !== 'load') return
+    const wanted = readerTarget.current
+    if (wanted !== null) {
+      if (!sameSymbol(wanted, decision.symbol)) return
+      readerTarget.current = null
+    }
     if (failedFollow.current === `${decision.symbol}|${decision.timeframe}`) return
 
     clearTimeout(followTimer.current)
@@ -254,7 +336,106 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
       void load(decision.symbol, decision.timeframe, 'follow')
     }, FOLLOW_SETTLE_MS)
     return () => clearTimeout(followTimer.current)
-  }, [fromAgent, own, pinned, width, load])
+  }, [fromAgent, own, pinned, width, load, talking])
+
+  // Follow the walkthrough onto the series its section is told on. It
+  // overrides a pin: the reader is listening to the analyst talk about this
+  // chart. Touching the symbol or the timeframe hands the chart back.
+  const boardSeries = board === null ? null : `${board.symbol}|${board.timeframe}`
+  const ownSeries = own === null ? null : `${own.symbol}|${own.timeframes[0]?.timeframe ?? ''}`
+  useEffect(() => {
+    if (board === null || width === 0) return
+    if (ownSeries !== null && sameSymbol(ownSeries, boardSeries!)) return
+    const wanted = readerTarget.current
+    if (wanted !== null) {
+      if (!sameSymbol(wanted, board.symbol)) return
+      readerTarget.current = null
+    }
+    if (failedFollow.current === boardSeries) return
+    setTimeframe(board.timeframe)
+    void load(board.symbol, board.timeframe, 'follow')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardSeries, ownSeries, width, load])
+
+  // Read the instrument out of what the reader just asked, and move the column
+  // to it before the model has said anything.
+  //
+  // The column otherwise follows the conversation only through the agent's
+  // tool calls, which lands twenty to forty seconds after the question — long
+  // enough that a reader who asks about a second ticker concludes the column
+  // is stuck. This is the fast half; when the analyst charts something else a
+  // moment later, its payload wins and the guess is forgotten.
+  //
+  // Two sources, because a message sent while a turn is still running is not
+  // history yet: it sits in the session's inbox (`queue`) until the agent
+  // admits it. Reading only the conversation nodes meant the second ticker of a
+  // session — the one sent mid-answer — was never seen at all.
+  const asked = useSession?.(state => {
+    const queued = state.queue.length > 0 ? state.queue[state.queue.length - 1] : undefined
+    const queuedText = queued?.text?.trim() ?? ''
+    if (queued !== undefined && queuedText !== '') return `q\u0000${queued.messageId}\u0000${queuedText}`
+    for (let i = state.nodes.length - 1; i >= 0; i -= 1) {
+      const node = state.nodes[i]
+      // `steering` is a message the reader sent while a turn was still running.
+      if (node?.kind === 'user' || node?.kind === 'steering') {
+        return `n\u0000${node.seq}\u0000${node.time}\u0000${messageText(node)}`
+      }
+    }
+    return ''
+  })
+  useEffect(() => {
+    if (asked === undefined || asked === '' || width === 0) return
+    const [source, stamp, ...rest] = asked.split('\u0000')
+    const text = rest.join('\u0000')
+    if (text.trim() === '' || sniffed.current === text) return
+    sniffed.current = text
+    // Only what is said now counts. Opening a page onto an existing
+    // conversation must not yank the chart to whatever was last typed there an
+    // hour ago, and a replay after a reload is history by the same rule. A
+    // queued message has no timestamp because it has not been recorded yet.
+    if (source === 'n' && Date.now() - Number(stamp) > SNIFF_FRESH_MS) return
+    const candidates = readSymbolCandidates(text)
+    if (candidates.length === 0) return
+    // Naming a different instrument outranks a walkthrough that is still
+    // talking: the reader has moved on, and the old section would otherwise
+    // keep dragging the column back to the chart it was told on.
+    if (talk.board !== null) lesson.dismiss()
+    setPinned(false)
+    void (async () => {
+      // The first name that resolves wins: "先看 NVDA 再看 腾讯" opens NVDA,
+      // which is the order the reader said them in.
+      for (const candidate of candidates) {
+        if (candidate.kind === 'symbol') {
+          readerTarget.current = candidate.value
+          void load(candidate.value, timeframe, 'follow')
+          return
+        }
+        try {
+          const hits = await market.search(candidate.value)
+          // A name is the provider's call; a lower-case Latin word has to prove
+          // it is that company, or "buy now" would open BUY.
+          const hit = candidate.kind === 'text'
+            ? hits[0]
+            : hits.find(item => isSameInstrument(candidate.value, item))
+          if (hit !== undefined) {
+            readerTarget.current = hit.symbol
+            void load(hit.symbol, timeframe, 'follow')
+            return
+          }
+        } catch {
+          // A failed guess is not the reader's problem: the analyst's own chart
+          // call will arrive shortly and land the column where it belongs.
+        }
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, width, market, load])
+
+  // Tell the chat cards whether the chart lives here, so a data read collapses to one line.
+  useEffect(() => {
+    setColumnOpen(width > 0)
+    return () => setColumnOpen(false)
+  }, [width])
 
   // One symbols probe on mount, purely to tell the user what this provider
   // actually carries — a wrong-format symbol is the likeliest first mistake.
@@ -417,11 +598,13 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
     e.preventDefault()
     const symbol = draft.trim()
     if (symbol === '') return
+    if (board !== null) lesson.dismiss()
     setPinned(true)
     void load(symbol, activeTimeframe)
   }
 
   const pickTimeframe = (tf: string): void => {
+    if (board !== null) lesson.dismiss()
     setPinned(true)
     setTimeframe(tf)
     // Prefer the symbol on screen over the draft: switching the period of a
@@ -433,7 +616,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
   // The agent's drawings, and what to do about them. Suppressed while the body
   // is showing a loading or error screen: `own` survives a failed lookup, so a
   // pill there would claim marks over an error message.
-  const showPill = active !== null && own !== null && error === null && !(busy && payload === null)
+  const showPill = active !== null && own !== null && error === null && !(busy && payload === null) && !lessonOn
   // Scenarios draw their own trigger/invalidation lines, so a scenario-only
   // analysis is not "0 marks".
   const markCount = active === null ? 0 : active.annotations.length + active.scenarios.length
@@ -508,7 +691,7 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
           style={INPUT}
           value={draft}
           onChange={e => setDraft(e.target.value)}
-          placeholder="Symbol — e.g. US.MU"
+          placeholder="Symbol — e.g. AAPL, 0700.HK, BTC-USD"
           aria-label="Chart symbol"
           spellCheck={false}
           autoCapitalize="off"
@@ -529,6 +712,52 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
             >
               📌 Pinned
             </button>
+          )
+          : null}
+        {ask !== undefined && own !== null && !busy
+          ? (
+            <button
+              type="button"
+              style={{ ...TF_BUTTON(true), whiteSpace: 'nowrap' }}
+              title={`Ask the analyst to walk you through ${own.symbol}`}
+              onClick={() => {
+                // Handing the question over also hands the chart back, or the
+                // column would stay pinned to the series it already has and
+                // ignore every section the analyst draws next.
+                setPinned(false)
+                if (board !== null) lesson.dismiss()
+                ask(`讲讲 ${own.symbol}`)
+              }}
+            >
+              Ask about {own.symbol}
+            </button>
+          )
+          : null}
+        {board !== null
+          ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span
+                style={{ ...TF_BUTTON(true), cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                title="The analyst is talking you through this chart; click a line in the chat to see that moment again."
+              >
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: '#65f84f', boxShadow: '0 0 0 1.5px currentColor' }} />
+                {talk.mode === 'live' ? 'speaking' : talk.mode === 'paused' ? (talk.look ? 'waiting for you' : 'paused') : talk.mode === 'replay' ? 'looking back' : 'walkthrough'}
+                {talk.section !== null ? ` · ${talk.section}` : ''}
+                {!lessonOn ? ' · loading' : ''}
+              </span>
+              {talk.mode === 'live' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.pause()}>Pause</button> : null}
+              {talk.mode === 'paused' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.resume()}>Resume</button> : null}
+              {talk.mode === 'replay' ? <button type="button" style={TF_BUTTON(false)} onClick={() => lesson.backToLive()}>Back</button> : null}
+              {talk.mode === 'live' || talk.mode === 'paused' ? <button type="button" style={TF_BUTTON(false)} title="Show every line now" onClick={() => lesson.skipAll()}>Show all</button> : null}
+              <button
+                type="button"
+                style={{ ...TF_BUTTON(false), padding: '2px 5px' }}
+                title="Put the chart back to normal"
+                onClick={() => lesson.dismiss()}
+              >
+                ×
+              </button>
+            </span>
           )
           : null}
         {marksPill}
@@ -558,7 +787,26 @@ export function ChartPanel({ width, market }: ChartOwnerProps & ChartPanelInject
               </div>
             )
             : payload !== null
-              ? <ChartBody payload={payload} shell={PANEL_SHELL} fill prose={false} />
+              ? (
+                <ChartBody
+                  payload={payload}
+                  shell={PANEL_SHELL}
+                  fill
+                  prose={false}
+                  forceChips={lessonOn ? (board?.pane !== undefined ? [board.pane] : []) : undefined}
+                  overlay={lessonOn
+                    ? ready => (
+                      <LessonLayer
+                        chart={ready.chart}
+                        panes={ready.panes}
+                        board={board}
+                        dark={dark}
+                        onUserMove={() => lesson.pause(true)}
+                      />
+                    )
+                    : undefined}
+                />
+              )
               : (
                 <div style={NOTE}>
                   <p>Type a symbol above, or ask the agent for one.</p>

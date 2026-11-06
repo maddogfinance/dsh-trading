@@ -47,10 +47,10 @@ describe('channel identity', () => {
   })
 
   it('exposes exactly the endpoints it means to', () => {
-    // Two data reads plus the panel's own view publication. Anything appearing
-    // here that is not one of these three deserves a second look: this channel
-    // is reachable from a browser.
-    expect(Object.values(ENDPOINTS).sort()).toEqual(['ohlcv', 'symbols', 'view'])
+    // Three data reads plus the panel's own view publication. Anything
+    // appearing here that is not one of these four deserves a second look:
+    // this channel is reachable from a browser.
+    expect(Object.values(ENDPOINTS).sort()).toEqual(['ohlcv', 'search', 'symbols', 'view'])
   })
 })
 

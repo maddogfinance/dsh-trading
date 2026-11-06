@@ -59,4 +59,14 @@ export interface MarketDataProvider {
    * trimmed to `limit` from the end. Unknown symbols/timeframes throw.
    */
   getOhlcv(query: OhlcvQuery): Promise<Candle[]>
+  /**
+   * Resolve a name, a word, or a half-remembered ticker to instruments.
+   *
+   * Optional on purpose: a CSV tree or a broker feed may have no search of its
+   * own, and callers then fall back to asking for the exact symbol instead of
+   * pretending a lookup happened.
+   * @param query - free text: `AAPL`, `apple`, `腾讯`, `bitcoin`.
+   * @returns best matches, most relevant first; empty when nothing matched.
+   */
+  search?(query: string): Promise<InstrumentInfo[]>
 }

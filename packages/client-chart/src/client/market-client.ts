@@ -37,6 +37,11 @@ export interface PanelInstrument {
 /** What the panel needs from the host; the whole surface the UI may touch. */
 export interface MarketClient {
   listSymbols(signal?: AbortSignal): Promise<{ providerId: string; description: string; symbols: PanelInstrument[] }>
+  /**
+   * Resolve free text — a name, a half-remembered ticker, a Chinese company —
+   * to instruments the provider can chart. Empty when it found nothing.
+   */
+  search(query: string, signal?: AbortSignal): Promise<PanelInstrument[]>
   getPayload(symbol: string, timeframe: string, signal?: AbortSignal): Promise<ChartPayload>
   /** The last few bars only — what a live refresh needs, without refetching the series. */
   getTail(symbol: string, timeframe: string, bars: number, signal?: AbortSignal): Promise<Candle[]>
@@ -105,6 +110,36 @@ export function withCandles(payload: ChartPayload, candles: Candle[]): ChartPayl
   const tf = payload.timeframes[0]
   if (tf === undefined || tf.candles === candles) return payload
   return { ...payload, timeframes: [{ ...tf, candles }, ...payload.timeframes.slice(1)] }
+}
+
+/**
+ * Lay a walkthrough section's indicator columns onto the column's own series.
+ *
+ * Matched by bar time, never by position: the section's columns cover the
+ * window the model read, the column's series is longer and keeps ticking, so
+ * position would shift every value by however many bars the two differ. Bars
+ * outside the section's window get no value rather than a recomputed one, so
+ * the pane shows exactly the numbers the model read and nothing else.
+ *
+ * @param payload - the column's live payload.
+ * @param series - the section's columns, keyed by bar open time.
+ * @returns the payload with those columns added, or the same one when there are none.
+ */
+export function withLessonSeries(
+  payload: ChartPayload,
+  series: { t: number[]; cols: Record<string, (number | null)[]> } | undefined,
+): ChartPayload {
+  const tf = payload.timeframes[0]
+  if (series === undefined || tf === undefined) return payload
+  const index = new Map(series.t.map((t, i) => [t, i]))
+  const cols: Record<string, (number | null)[]> = {}
+  for (const [name, col] of Object.entries(series.cols)) {
+    cols[name] = tf.candles.map(c => {
+      const i = index.get(Date.parse(c.time))
+      return i === undefined ? null : col[i] ?? null
+    })
+  }
+  return { ...payload, timeframes: [{ ...tf, series: { ...tf.series, ...cols } }, ...payload.timeframes.slice(1)] }
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,6 +382,13 @@ export function createMarketClient(rpc: RpcCaller): MarketClient {
         symbols: PanelInstrument[]
       }
       return value
+    },
+
+    async search(query, signal) {
+      const value = await unwrap(rpc.call(CHANNEL, 'search', { query }, signal)) as {
+        items: PanelInstrument[]
+      }
+      return value.items
     },
 
     async getPayload(symbol, timeframe, signal) {
